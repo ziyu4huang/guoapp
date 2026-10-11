@@ -1,19 +1,9 @@
 //! guo — 红果短剧命令行工具。Rust 重写的 guoapp 核心：
 //! 目录 / 搜索 / 详情 / 取流（App→网页→备用三层回退）/ 离线下载。
 
-mod backup;
-mod cenc;
-mod hgapp;
-mod hgweb;
-mod jsonx;
-mod media;
-mod model;
-mod sign;
-mod state;
-
-use hgapp::{HgClient, GENRES};
-use model::{Chapter, Drama};
-use state::{EpisodeEntry, LibraryEntry, Store};
+use guo::hgapp::{detail_with_fallback, search_combined, HgClient, GENRES};
+use guo::model::{Chapter, Drama};
+use guo::state::{EpisodeEntry, LibraryEntry, Store};
 use std::collections::BTreeMap;
 use std::io::Write as _;
 
@@ -59,7 +49,7 @@ fn main() {
             let (_, flags) = parse_args(&rest);
             match flags.get("file") {
                 Some(file) => {
-                    println!("{}", cenc::inspect(std::path::Path::new(file)));
+                    println!("{}", guo::cenc::inspect(std::path::Path::new(file)));
                     0
                 }
                 None => fail("用法：guo cenc-debug --file <mp4>"),
@@ -136,7 +126,7 @@ fn catalog(client: &HgClient, store: &mut Store, rest: &[String]) -> i32 {
     let reset = flags.contains_key("reset");
     let pages = flag_num(&flags, "pages", 1).max(1) as usize;
     let genre_arg = flags.get("genre").cloned().or_else(|| positional.first().cloned());
-    let genres: Vec<&hgapp::Genre> = match genre_arg.as_deref() {
+    let genres: Vec<&guo::hgapp::Genre> = match genre_arg.as_deref() {
         Some(name) => match GENRES.iter().find(|g| g.key == name || g.name == name) {
             Some(g) => vec![g],
             None => {
@@ -149,7 +139,7 @@ fn catalog(client: &HgClient, store: &mut Store, rest: &[String]) -> i32 {
     let mut failures: Vec<String> = Vec::new();
     for g in genres {
         let feed_key = g.key.to_string();
-        let mut cursor = if reset { state::FeedCursor::default() } else { store.feed(&feed_key) };
+        let mut cursor = if reset { guo::state::FeedCursor::default() } else { store.feed(&feed_key) };
         let mut collected: Vec<Drama> = Vec::new();
         let mut page_err = String::new();
         for _ in 0..pages {
@@ -160,7 +150,7 @@ fn catalog(client: &HgClient, store: &mut Store, rest: &[String]) -> i32 {
                 Ok((items, next)) => {
                     let added = items.len();
                     let (next_offset, next_exhausted) = (next.offset, next.exhausted);
-                    hgweb::merge_dramas(&mut collected, items);
+                    guo::hgweb::merge_dramas(&mut collected, items);
                     cursor = next;
                     if added == 0 || (!next_exhausted && next_offset == 0) {
                         break;
@@ -224,36 +214,11 @@ fn search(client: &HgClient, rest: &[String]) -> i32 {
         None => return fail("缺少搜索词"),
     };
     let json = flag_bool(&flags, "json");
-    let keyword = match hgweb::validate_keyword(&keyword) {
-        Ok(k) => k,
+    let (dramas, warning) = match search_combined(client, &keyword) {
+        Ok(result) => result,
         Err(e) => return fail(&e),
     };
-    let names = hgweb::search_names(client, &keyword);
-    let page = client.web_search(&keyword);
-    if page.is_err() && names.is_err() {
-        return fail(&format!(
-            "红果搜索失败：{}；{}",
-            page.err().unwrap(),
-            names.err().unwrap()
-        ));
-    }
-    let mut dramas: Vec<Drama> = Vec::new();
-    let mut warning = String::new();
-    match page {
-        Ok((page_dramas, _)) => hgweb::merge_dramas(&mut dramas, page_dramas),
-        Err(_) => warning = "红果综合搜索暂不可用，已保留名称匹配结果".into(),
-    }
-    match names {
-        Ok(list) => hgweb::merge_dramas(&mut dramas, list),
-        Err(_) if warning.is_empty() => warning = "红果名称检索暂不可用，结果可能缺少部分剧集".into(),
-        Err(_) => {}
-    }
-    dramas.sort_by(|a, b| {
-        hgweb::title_search_rank(&a.title, &keyword)
-            .cmp(&hgweb::title_search_rank(&b.title, &keyword))
-            .then_with(|| a.title.cmp(&b.title))
-    });
-    if !warning.is_empty() {
+    if let Some(warning) = warning {
         eprintln!("提示：{}，可重试", warning);
     }
     if json {
@@ -276,7 +241,7 @@ fn suggest(client: &HgClient, rest: &[String]) -> i32 {
         Some(q) => q.clone(),
         None => return fail("缺少联想词"),
     };
-    let query = match hgweb::validate_keyword(&raw) {
+    let query = match guo::hgweb::validate_keyword(&raw) {
         Ok(k) => k,
         Err(e) => return fail(&e),
     };
@@ -286,13 +251,13 @@ fn suggest(client: &HgClient, rest: &[String]) -> i32 {
             let items: Vec<serde_json::Value> = records
                 .iter()
                 .filter_map(|record| {
-                    let name = crate::jsonx::jstr(record, &["name"]);
+                    let name = guo::jsonx::jstr(record, &["name"]);
                     if name.is_empty() || !seen.insert(name.to_lowercase()) {
                         return None;
                     }
                     Some(serde_json::json!({
                         "name": name,
-                        "type": crate::jsonx::jstr(record, &["word_type"])
+                        "type": guo::jsonx::jstr(record, &["word_type"])
                     }))
                 })
                 .take(10)
@@ -319,27 +284,7 @@ fn fetch_detail(
     store: &Store,
     drama_id: &str,
 ) -> Result<(Drama, Vec<Chapter>), String> {
-    let (_, series_id) = model::split_drama_id(drama_id)
-        .ok_or_else(|| "剧 ID 无效，应为 hongguo:<数字>".to_string())?;
-    if !model::is_numeric_id(series_id) {
-        return Err("红果剧集 ID 无效".into());
-    }
-    match client.detail(store, series_id) {
-        Ok(result) => Ok(result),
-        Err(app_err) => match client.web_detail(series_id) {
-            Ok((title, chapters)) => Ok((
-                Drama {
-                    id: model::drama_id(model::SRC_HONGGUO, series_id),
-                    source: model::SRC_HONGGUO.into(),
-                    source_id: series_id.to_string(),
-                    title,
-                    ..Drama::default()
-                },
-                chapters,
-            )),
-            Err(web_err) => Err(format!("App 详情失败：{}；网页详情失败：{}", app_err, web_err)),
-        },
-    }
+    detail_with_fallback(client, store, drama_id)
 }
 
 fn detail(client: &HgClient, store: &Store, rest: &[String]) -> i32 {
@@ -380,7 +325,7 @@ fn pick_chapter(chapters: &[Chapter], episode: usize) -> Result<Chapter, String>
         .ok_or_else(|| format!("第 {} 集不存在（共 {} 集）", episode, chapters.len()))
 }
 
-fn pick_quality(m: model::Media, quality: i64) -> model::Media {
+fn pick_quality(m: guo::model::Media, quality: i64) -> guo::model::Media {
     if quality <= 0 || m.variants.is_empty() {
         return m;
     }
@@ -390,7 +335,7 @@ fn pick_quality(m: model::Media, quality: i64) -> model::Media {
         .find(|v| v.quality == quality)
         .or_else(|| m.variants.iter().max_by_key(|v| v.quality));
     match chosen {
-        Some(variant) => model::Media {
+        Some(variant) => guo::model::Media {
             url: variant.url.clone(),
             referer: variant.referer.clone(),
             quality: variant.quality,
@@ -421,7 +366,7 @@ fn resolve(client: &HgClient, store: &Store, rest: &[String]) -> i32 {
         Err(e) => return fail(&e),
     };
     let media = pick_quality(
-        media::resolve_media(client, store, &drama.source_id, &chapter.video_id),
+        guo::media::resolve_media(client, store, &drama.source_id, &chapter.video_id),
         quality,
     );
     if flag_bool(&flags, "json") {
@@ -472,7 +417,7 @@ fn play(client: &HgClient, store: &Store, rest: &[String]) -> i32 {
         Err(e) => return fail(&e),
     };
     let media = pick_quality(
-        media::resolve_media(client, store, &drama.source_id, &chapter.video_id),
+        guo::media::resolve_media(client, store, &drama.source_id, &chapter.video_id),
         quality,
     );
     match player.as_str() {
@@ -604,11 +549,11 @@ fn download(client: &HgClient, store: &mut Store, rest: &[String]) -> i32 {
             }
         }
         let media = pick_quality(
-            media::resolve_media(client, store, &drama.source_id, &chapter.video_id),
+            guo::media::resolve_media(client, store, &drama.source_id, &chapter.video_id),
             quality,
         );
         let dir = root.join(format!("ep_{:03}", episode));
-        match media::download_episode(client, &media, &dir, quality, &format!("第{}集", episode)) {
+        match guo::media::download_episode(client, &media, &dir, quality, &format!("第{}集", episode)) {
             Ok((file, kind, got_quality)) => {
                 entry.episodes.retain(|e| e.index != episode);
                 entry.episodes.push(EpisodeEntry {
@@ -668,14 +613,14 @@ fn fetch(client: &HgClient, rest: &[String]) -> i32 {
         .get("out")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("guo-fetch"));
-    let media = model::Media {
+    let media = guo::model::Media {
         url,
         referer,
         quality: 0,
         cenc_key: key,
         variants: Vec::new(),
     };
-    match media::download_episode(client, &media, &out, 0, "fetch") {
+    match guo::media::download_episode(client, &media, &out, 0, "fetch") {
         Ok((file, kind, _)) => {
             println!("{}/{}（{}）", out.display(), file, kind);
             0

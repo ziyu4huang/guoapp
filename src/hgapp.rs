@@ -14,13 +14,14 @@ pub const WEB_BASE: &str = "https://hongguoduanju.com";
 const APP_UA: &str = "com.phoenix.read/73532 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)";
 pub const WEB_UA: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Mobile/15E148 Safari/604.1";
 
+#[derive(Clone, Copy)]
 pub struct Genre {
     pub key: &'static str,
     pub scene: &'static str,
     pub name: &'static str,
 }
 
-pub const GENRES: [Genre; 3] = [
+pub static GENRES: [Genre; 3] = [
     Genre { key: "short_play", scene: "default", name: "真人剧" },
     Genre { key: "comic_series", scene: "comic_series", name: "漫剧" },
     Genre { key: "ai_series", scene: "ai_series", name: "AI剧" },
@@ -211,8 +212,7 @@ impl HgClient {
     }
 
     /// Resolve playable media for one episode via the App API.
-    pub fn media(&self, store: &Store, video_id: &str) -> Result<Media, String> {
-        if !is_numeric_id(video_id) {
+    pub fn media(&self, store: &Store, video_id: &str) -> Result<Media, String> {        if !is_numeric_id(video_id) {
             return Err("红果视频 ID 无效".into());
         }
         let result = self.app_request(
@@ -691,4 +691,70 @@ pub fn media_addresses(info: &Value) -> Vec<String> {
         }
     }
     addresses
+}
+
+/// Drama detail with App → Web fallback (shared by CLI and GUI).
+pub fn detail_with_fallback(
+    client: &HgClient,
+    store: &Store,
+    drama_id: &str,
+) -> Result<(Drama, Vec<Chapter>), String> {
+    let (_, series_id) = crate::model::split_drama_id(drama_id)
+        .ok_or_else(|| "剧 ID 无效，应为 hongguo:<数字>".to_string())?;
+    if !is_numeric_id(series_id) {
+        return Err("红果剧集 ID 无效".into());
+    }
+    match client.detail(store, series_id) {
+        Ok(result) => Ok(result),
+        Err(app_err) => match client.web_detail(series_id) {
+            Ok((title, chapters)) => Ok((
+                Drama {
+                    id: crate::model::drama_id(crate::model::SRC_HONGGUO, series_id),
+                    source: crate::model::SRC_HONGGUO.into(),
+                    source_id: series_id.to_string(),
+                    title,
+                    ..Drama::default()
+                },
+                chapters,
+            )),
+            Err(web_err) => Err(format!("App 详情失败：{}；网页详情失败：{}", app_err, web_err)),
+        },
+    }
+}
+
+/// Combined search: web search page + suggestion-name index, merged and ranked.
+/// Returns dramas plus an optional warning.
+pub fn search_combined(
+    client: &HgClient,
+    keyword: &str,
+) -> Result<(Vec<Drama>, Option<String>), String> {
+    let keyword = crate::hgweb::validate_keyword(keyword)?;
+    let names = crate::hgweb::search_names(client, &keyword);
+    let page = client.web_search(&keyword);
+    if page.is_err() && names.is_err() {
+        return Err(format!(
+            "红果搜索失败：{}；{}",
+            page.err().unwrap(),
+            names.err().unwrap()
+        ));
+    }
+    let mut dramas: Vec<Drama> = Vec::new();
+    let mut warning: Option<String> = None;
+    match page {
+        Ok((page_dramas, _)) => crate::hgweb::merge_dramas(&mut dramas, page_dramas),
+        Err(_) => warning = Some("红果综合搜索暂不可用，已保留名称匹配结果".into()),
+    }
+    match names {
+        Ok(list) => crate::hgweb::merge_dramas(&mut dramas, list),
+        Err(_) if warning.is_none() => {
+            warning = Some("红果名称检索暂不可用，结果可能缺少部分剧集".into())
+        }
+        Err(_) => {}
+    }
+    dramas.sort_by(|a, b| {
+        crate::hgweb::title_search_rank(&a.title, &keyword)
+            .cmp(&crate::hgweb::title_search_rank(&b.title, &keyword))
+            .then_with(|| a.title.cmp(&b.title))
+    });
+    Ok((dramas, warning))
 }

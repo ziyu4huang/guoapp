@@ -1,8 +1,8 @@
 [package]
 name = "guo"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "guoapp — 红果短剧命令行工具（Rust 重写）：目录 / 搜索 / 取流 / 下载"
+description = "guoapp — 红果短剧工具（Rust 重写）：CLI + 原生 GUI（egui），目录 / 搜索 / 取流 / 下载"
 
 [dependencies]
 ureq = "2"
@@ -15,6 +15,20 @@ aes = "0.8"
 cbc = "0.1"
 base64 = "0.22"
 url = "2"
+eframe = "=0.31.0"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
+
+[lib]
+name = "guo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "guo"
+path = "src/main.rs"
+
+[[bin]]
+name = "guo-gui"
+path = "src/bin/guo-gui.rs"
 
 [profile.release]
 lto = true

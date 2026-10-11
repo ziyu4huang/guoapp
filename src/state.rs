@@ -41,7 +41,7 @@ pub struct LibraryEntry {
     pub episodes: Vec<EpisodeEntry>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Store {
     pub dir: PathBuf,
     pub state: State,

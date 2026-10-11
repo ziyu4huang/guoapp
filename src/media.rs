@@ -10,22 +10,38 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 /// Resolve playable media for one episode through all three fallbacks.
-pub fn resolve_media(client: &HgClient, store: &Store, series_id: &str, video_id: &str) -> Media {
+/// Returns the resolved media; callers decide how to surface errors.
+pub fn try_resolve_media(
+    client: &HgClient,
+    store: &Store,
+    series_id: &str,
+    video_id: &str,
+) -> Result<Media, String> {
     let mut errors = Vec::new();
     match client.media(store, video_id) {
-        Ok(media) => return media,
+        Ok(media) => return Ok(media),
         Err(err) => errors.push(format!("App 取流：{}", err)),
     }
     match client.web_media(series_id, video_id) {
-        Ok(media) => return media,
+        Ok(media) => return Ok(media),
         Err(err) => errors.push(format!("网页取流：{}", err)),
     }
     match client.backup_media(series_id, video_id) {
-        Ok(media) => return media,
+        Ok(media) => return Ok(media),
         Err(err) => errors.push(format!("备用取流：{}", err)),
     }
-    eprintln!("红果取流失败：{}", errors.join("；"));
-    std::process::exit(1);
+    Err(format!("红果取流失败：{}", errors.join("；")))
+}
+
+/// CLI variant: prints the combined error and exits.
+pub fn resolve_media(client: &HgClient, store: &Store, series_id: &str, video_id: &str) -> Media {
+    match try_resolve_media(client, store, series_id, video_id) {
+        Ok(media) => media,
+        Err(err) => {
+            eprintln!("{}", err);
+            std::process::exit(1);
+        }
+    }
 }
 
 struct Segment {
@@ -453,21 +469,31 @@ pub fn download_episode(
     quality: i64,
     label: &str,
 ) -> Result<(String, String, i64), String> {
+    download_episode_progress(client, media, out_dir, quality, label, &mut |_| {})
+}
+
+/// Same as `download_episode`, reporting 0..1 progress to the callback.
+pub fn download_episode_progress(
+    client: &HgClient,
+    media: &Media,
+    out_dir: &Path,
+    quality: i64,
+    label: &str,
+    on_progress: &mut dyn FnMut(f32),
+) -> Result<(String, String, i64), String> {
     std::fs::create_dir_all(out_dir).map_err(|e| format!("创建目录失败：{}", e))?;
     let parsed = url::Url::parse(&media.url).map_err(|_| "下载地址无效".to_string())?;
     let is_hls = parsed.path().to_lowercase().ends_with(".m3u8");
     let mut progress = Progress::new(label);
     if is_hls {
         let bundle = download_bundle(client, media, quality, out_dir, label)?;
-        let total = bundle.segments.len();
-        let mut bytes: u64 = 0;
+        let total = bundle.segments.len().max(1);
         for (index, segment) in bundle.segments.iter().enumerate() {
             let target = out_dir.join(&segment.name);
-            let size = download_segment(client, &segment.url, &media.referer, &target)
+            download_segment(client, &segment.url, &media.referer, &target)
                 .map_err(|e| format!("分片 {}/{} 下载失败：{}", index + 1, total, e))?;
-            bytes += size;
             progress.report((index + 1) as u64, total as u64);
-            let _ = bytes;
+            on_progress((index + 1) as f32 / total as f32);
         }
         for (name, body) in &bundle.playlists {
             write_atomic(&out_dir.join(name), body.as_bytes())?;
@@ -476,7 +502,8 @@ pub fn download_episode(
         Ok(("index.m3u8".into(), "hls".into(), bundle.quality))
     } else {
         let target = out_dir.join("media.mp4");
-        let size = download_direct(client, &media.url, &media.referer, &target, &mut progress)?;
+        let size =
+            download_direct(client, &media.url, &media.referer, &target, &mut progress, on_progress)?;
         progress.done();
         if let Some(key) = media.cenc_key {
             crate::cenc::decrypt_file(&target, &key)?;
@@ -493,6 +520,7 @@ fn download_direct(
     referer: &str,
     target: &Path,
     progress: &mut Progress,
+    on_progress: &mut dyn FnMut(f32),
 ) -> Result<u64, String> {
     if !is_http_media_url(address) {
         return Err("媒体下载地址无效".into());
@@ -620,6 +648,9 @@ fn download_direct(
                     }
                     received += n as u64;
                     progress.report(received, full_total.max(0) as u64);
+                    if full_total > 0 {
+                        on_progress(received as f32 / full_total as f32);
+                    }
                 }
                 Err(e) => {
                     failed = Some(format!("媒体文件未接收完整（{}），重试将续传", e));
