@@ -43,6 +43,13 @@ cargo run --release --bin guo-gui     # 或直接运行 target/release/guo-gui
 - 在线播放：依赖 mpv（`brew install mpv`）；红果流是 CENC 加密的，工具自动把
   spade_a 解出的 AES 金钥经 `--demuxer-lavf-o=decryption_key` 交给 mpv 的
   mov 解复用器，逐帧 md5 与下载后本地播放完全一致（2026-10-12 实测）
+- **播放会话（v0.3.0）**：单实例 mpv + JSON IPC——点下一集不再开新窗口，
+  同一窗口 `loadfile` 无缝换集；窗口标题/OSC 显示《剧名》第N集；详情面板
+  高亮正在播的集数、提供「⏭ 下一集」与「连播」开关（播完自动接下一集）；
+  `--hwdec=auto`（macOS VideoToolbox）修复 HEVC 软解丢帧闪跳；播放器 stderr
+  收进数据目录 `mpv-last.log`；检测到 [IINA](https://iina.io/) 时自动优先使用
+  （原生 macOS 界面/画中画），`GUO_MPV` 环境变量可指定任意 mpv 兼容播放器，
+  `GUO_MPV_ARGS` 可追加 mpv 参数
 - 本地已下载文件用系统默认播放器
 - 数据与 CLI 共用：`$GUOAPP_DATA` / `~/.local/share/guoapp`（macOS
   `~/Library/Application Support/guoapp`），下载状态两端互通

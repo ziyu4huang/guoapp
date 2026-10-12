@@ -9,5 +9,6 @@ pub mod hgweb;
 pub mod jsonx;
 pub mod media;
 pub mod model;
+pub mod player;
 pub mod sign;
 pub mod state;

@@ -422,19 +422,26 @@ fn play(client: &HgClient, store: &Store, rest: &[String]) -> i32 {
     );
     match player.as_str() {
         "mpv" | "iina" => {
-            let mut cmd = std::process::Command::new(player.as_str());
-            cmd.arg(&media.url);
-            if player == "mpv" {
-                cmd.arg(format!("--referrer={}", media.referer));
-                if let Some(key) = &media.cenc_key {
-                    cmd.arg(format!("--demuxer-lavf-o=decryption_key={}", hex::encode(key)));
-                }
+            // 与 GUI 同一路径：hwdec 硬解（防闪跳丢帧）+ 标题显示 + 预读缓冲
+            let kind = if player == "iina" {
+                guo::player::PlayerKind::Iina
             } else {
-                cmd.arg("--mpv-referrer").arg(&media.referer);
-            }
-            match cmd.status() {
-                Ok(status) if status.success() => 0,
-                Ok(status) => fail(&format!("播放器退出码 {:?}", status.code())),
+                guo::player::PlayerKind::Mpv
+            };
+            let item = guo::player::PlayItem {
+                url: media.url.clone(),
+                referer: media.referer.clone(),
+                key: media.cenc_key.as_ref().map(|k| hex::encode(k)),
+                title: format!("《{}》第{}集", drama.title, episode),
+            };
+            let ipc = guo::player::ipc_path();
+            let log_path = store.dir.join("mpv-last.log");
+            match guo::player::PlayerSession::launch(kind, player.as_str(), &item, &ipc, &log_path) {
+                Ok(mut session) => match session.child_wait() {
+                    Ok(status) if status.success() => 0,
+                    Ok(status) => fail(&format!("播放器退出码 {:?}", status.code())),
+                    Err(e) => fail(&format!("播放器异常：{}", e)),
+                },
                 Err(e) => fail(&format!("无法启动 {}：{}", player, e)),
             }
         }

@@ -87,6 +87,18 @@ impl Recorder {
     }
 }
 
+fn pump_until(harness: &mut H, secs: u64, mut ready: impl FnMut(&mut H) -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    while std::time::Instant::now() < deadline {
+        harness.run_steps(2);
+        if ready(harness) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    panic!("pump_until: condition not met within {}s", secs);
+}
+
 fn click_tab(harness: &mut H, prefix: &str) {
     let tab = harness
         .query_all_by(|node| {
@@ -180,4 +192,152 @@ fn record_demo_gif() {
     rec.record(&mut harness, 1800, 260);
 
     eprintln!("frames: {} → {}", rec.n, rec.dir.display());
+}
+
+/// IPC 单实例播放会话端到端实测（真实串流，无头渲染）：
+/// launch → 第一集 start-file → loadfile 换第二集 → end-file 事件 → quit。
+/// 运行：cargo test --test record_gif ipc_session_live -- --ignored --nocapture
+#[test]
+#[ignore]
+fn ipc_session_live() {
+    use guo::player::{self, PlayItem, PlayerEvent};
+
+    let store = guo::state::Store::load();
+    let client = guo::hgapp::HgClient::new();
+    let drama_id = "hongguo:7694857999663238168";
+    let (_, chapters) = guo::hgapp::detail_with_fallback(&client, &store, drama_id)
+        .expect("detail");
+    assert!(chapters.len() >= 2, "测试剧目需要至少 2 集");
+
+    let resolve = |ep: usize| {
+        let ch = chapters.iter().find(|c| c.index == ep).unwrap();
+        guo::media::try_resolve_media(&client, &store, "7694857999663238168", &ch.video_id)
+            .expect("resolve")
+    };
+    let m1 = resolve(1);
+    let item = |m: &guo::model::Media, ep: usize| PlayItem {
+        url: m.url.clone(),
+        referer: m.referer.clone(),
+        key: m.cenc_key.as_ref().map(|k| hex::encode(k)),
+        title: format!("《世子爷他要以身相许》第{}集", ep),
+    };
+
+    let (kind, program) = player::resolve_player();
+    assert_eq!(kind, player::PlayerKind::Mpv, "本机应走 mpv（无 IINA）");
+    let ipc = player::ipc_path();
+    let log = store.dir.join("mpv-test.log");
+    eprintln!("step1: launch");
+    let mut session = player::PlayerSession::launch(kind, &program, &item(&m1, 1), &ipc, &log)
+        .expect("launch mpv");
+    eprintln!("step2: session up, wait file-loaded");
+
+    let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let (ev_tx, ev_rx) = std::sync::mpsc::channel();
+    let ev_running = running.clone();
+    let ev_ipc = session.ipc.clone();
+    std::thread::spawn(move || {
+        player::event_loop(&ev_ipc, &ev_running, move |ev| ev_tx.send(ev).is_ok())
+    });
+
+    // 等 IPC 就绪 + 第一集开播（headless 下 start-file 事件即视为在播）
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut started = false;
+    while std::time::Instant::now() < deadline {
+        if let Ok(ev) = ev_rx.recv_timeout(std::time::Duration::from_millis(500)) {
+            if ev == PlayerEvent::FileLoaded {
+                started = true;
+                break;
+            }
+        }
+    }
+    assert!(started, "30s 内未收到 file-loaded（第一集未开播）");
+    eprintln!("✓ 第一集开播（IPC 事件链路通；注：start-file 可能早于连接被错过，file-loaded 才是可靠的开播信号）");
+
+    // 换第二集：同一会话 loadfile replace
+    let m2 = resolve(2);
+    eprintln!("step4: resolved ep2, sending loadfile");
+    session.load(&item(&m2, 2)).expect("loadfile ep2");
+    eprintln!("step5: loadfile acknowledged");
+
+    // 应先收到换集引起的 end-file(Replaced)，再收到第二集 start-file
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut replaced_seen = false;
+    let mut started2 = false;
+    while std::time::Instant::now() < deadline {
+        if let Ok(ev) = ev_rx.recv_timeout(std::time::Duration::from_millis(500)) {
+            eprintln!("  ev: {:?}", ev);
+            match ev {
+                PlayerEvent::Replaced => replaced_seen = true,
+                PlayerEvent::FileLoaded => {
+                    started2 = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+    assert!(started2, "30s 内第二集未开播（file-loaded）");
+    eprintln!("✓ 同一窗口换集成功（replaced_seen={}）", replaced_seen);
+
+    // 退出
+    running.store(false, std::sync::atomic::Ordering::Relaxed);
+    session.quit();
+    assert!(!session.process_alive(), "quit 后进程应已退出");
+    eprintln!("✓ 会话退出干净");
+}
+
+/// GUI 播放链路冒烟:点「▶ 播放第1集」→ 状态「▶ 正在播放」→ 详情面板出现
+/// 「正在播放:第1集」+ 集数格「▶1」标记 + 底栏常驻播放指示。
+/// GUO_MPV_ARGS=--vo=null --ao=null 由测试自身注入(无头环境 mpv 真窗口起不来)。
+#[test]
+#[ignore]
+fn gui_play_now_playing() {
+    std::env::set_var("GUO_MPV_ARGS", "--vo=null --ao=null");
+    std::env::set_var("GUOAPP_DATA", temp_data_dir());
+    let mut harness: H = Harness::builder()
+        .with_size(egui::vec2(1180.0, 740.0))
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| guo::gui::GuiApp::new(cc));
+
+    pump_until(&mut harness, 60, |h| {
+        h.query_all_by_label_contains("共").count() >= 40
+    });
+    const FIXED: [&str; 3] = ["清空封面缓存", "刷新", "搜索"];
+    let title = harness
+        .query_all_by(|node| {
+            node.role() == accesskit::Role::Button && node.toggled().is_none()
+        })
+        .filter_map(|node| node.label().map(|l| l.to_string()))
+        .find(|label| {
+            !FIXED.contains(&label.as_str())
+                && !label.starts_with("更多")
+                && !label.starts_with("真人剧")
+                && !label.starts_with("漫剧")
+                && !label.starts_with("AI剧")
+                && !label.starts_with("⬇")
+                && !label.starts_with("▶")
+                && label.chars().count() > 2
+        })
+        .expect("no cards");
+    harness
+        .get_by_role_and_label(accesskit::Role::Button, &title)
+        .click();
+    pump_until(&mut harness, 40, |h| {
+        h.query_by_label_contains("播放第1集").is_some()
+    });
+    harness.get_by_label_contains("播放第1集").click();
+
+    // 详情面板:「正在播放:第1集」标记(依赖 mpv spawn 成功)
+    pump_until(&mut harness, 40, |h| {
+        h.query_by_label_contains("正在播放：第1集").is_some()
+    });
+    // 集数格出现「▶1」金色标记
+    pump_until(&mut harness, 10, |h| {
+        h.query_by_label_contains("▶1").is_some()
+    });
+    // 下一集按钮出现(第1集在播 → 下一集=第2集)
+    pump_until(&mut harness, 10, |h| {
+        h.query_by_label_contains("下一集").is_some()
+    });
+    eprintln!("✓ GUI 播放链路:now_playing 标记/▶1 集格标记/下一集按钮 全部在场");
 }
