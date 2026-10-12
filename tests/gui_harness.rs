@@ -58,6 +58,59 @@ fn save_png(harness: &mut H, name: &str) {
     eprintln!("screenshot → {}", out.display());
 }
 
+/// 「更多AI剧」分页回归测试：点击后 AI剧 卡片数必须严格增长。
+/// （旧 bug：分页 cursor 被丢弃，每次点击都重抓第一页，清单不变。）
+/// 运行：cargo test --test gui_harness catalog_load_more_grows -- --ignored --nocapture
+#[test]
+#[ignore]
+fn catalog_load_more_grows() {
+    std::env::set_var("GUOAPP_DATA", temp_data_dir());
+    let mut harness: H = Harness::builder()
+        .with_size(egui::vec2(1180.0, 760.0))
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| guo::gui::GuiApp::new(cc));
+
+    // 初始目录加载完成：分类计数标签从 (0) 变为有内容（如 "AI剧 (18)"；
+    // 标签本身第一帧就存在，必须等计数 > 0）
+    pump_until(&mut harness, 60, |h| ai_count(h) > 0);
+    fn ai_count(h: &H) -> usize {
+        h.query_all_by_label_contains("AI剧 (")
+            .filter_map(|n| n.label().and_then(|l| digits(&l)))
+            .find(|c| *c > 0)
+            .unwrap_or(0)
+    }
+    let before = ai_count(&harness);
+    assert!(before > 0, "AI剧 初始目录为空");
+
+    // 点「更多AI剧」→ 数量必须严格增长（修复前：数量不变）
+    harness
+        .get_by_role_and_label(accesskit::Role::Button, "更多AI剧")
+        .click();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+    loop {
+        harness.run_steps(2);
+        let now = ai_count(&harness);
+        if now > before {
+            eprintln!("AI剧 卡片数 {} → {}，「更多」分页正常", before, now);
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "点击「更多AI剧」后数量未增长（{} → {}）：分页 cursor 修复失效",
+            before,
+            now
+        );
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    // 再点一次确认可连续翻页且不误标「已到底」
+    let mid = ai_count(&harness);
+    harness
+        .get_by_role_and_label(accesskit::Role::Button, "更多AI剧")
+        .click();
+    pump_until(&mut harness, 90, |h| ai_count(h) > mid);
+    save_png(&mut harness, "guo-kit-load-more.png");
+}
+
 /// 全链路真实 API 测试，显式运行：cargo test --test gui_harness -- --ignored --nocapture
 #[test]
 #[ignore]

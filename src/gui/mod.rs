@@ -51,7 +51,13 @@ enum Msg {
     CatalogPage {
         genre: String,
         dramas: Vec<Drama>,
-        exhausted: bool,
+        /// 分页游标：必须存回 store，否则「更多×」永远重抓第一页。
+        cursor: crate::state::FeedCursor,
+    },
+    /// 目录页加载失败：只解除 busy 标记（可重试），不标已到底。
+    CatalogFailed {
+        genre: String,
+        err: String,
     },
     SearchDone {
         query: String,
@@ -186,15 +192,14 @@ impl GuiApp {
                     let _ = tx.send(Msg::CatalogPage {
                         genre: genre.key.to_string(),
                         dramas: items,
-                        exhausted: next.exhausted,
+                        cursor: next,
                     });
                 }
                 Err(err) => {
                     let _ = tx.send(Msg::Status(format!("{} 目录失败：{}", genre.name, err)));
-                    let _ = tx.send(Msg::CatalogPage {
+                    let _ = tx.send(Msg::CatalogFailed {
                         genre: genre.key.to_string(),
-                        dramas: Vec::new(),
-                        exhausted: true,
+                        err,
                     });
                 }
             }
@@ -353,13 +358,19 @@ impl GuiApp {
 
     fn apply_msg(&mut self, ctx: &egui::Context, msg: Msg) {
         match msg {
-            Msg::CatalogPage { genre, dramas, exhausted } => {
+            Msg::CatalogPage { genre, dramas, cursor } => {
                 let slot = self.catalog.entry(genre.clone()).or_default();
                 crate::hgweb::merge_dramas(slot, dramas);
                 self.catalog_loading.remove(&genre);
-                if exhausted {
+                self.store.set_feed(&genre, cursor);
+                let _ = self.store.save();
+                if self.store.feed(&genre).exhausted {
                     self.catalog_exhausted.insert(genre);
                 }
+            }
+            Msg::CatalogFailed { genre, err } => {
+                self.catalog_loading.remove(&genre);
+                self.set_status(format!("{} 目录失败（可点「更多」重试）：{}", genre, err));
             }
             Msg::SearchDone { query, dramas, warning } => {
                 if query == self.search_submitted {
