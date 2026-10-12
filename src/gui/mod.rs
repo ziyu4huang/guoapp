@@ -389,7 +389,19 @@ impl GuiApp {
                 match chapters {
                     Ok(list) => {
                         if !drama.title.is_empty() {
-                            detail.drama = drama;
+                            // 详情接口的 cover/intro 常为空——空字段保留卡片原有值，
+                            // 不能整只覆盖（否则详情封面永远灰块、简介永远「(无)」）。
+                            let mut merged = drama;
+                            if merged.cover.is_empty() {
+                                merged.cover = detail.drama.cover.clone();
+                            }
+                            if merged.intro.is_empty() {
+                                merged.intro = detail.drama.intro.clone();
+                            }
+                            if merged.remark.is_empty() {
+                                merged.remark = detail.drama.remark.clone();
+                            }
+                            detail.drama = merged;
                         }
                         detail.selected = list.iter().map(|c| c.index).collect();
                         detail.chapters = Some(list);

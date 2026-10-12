@@ -1,9 +1,22 @@
 # guoapp（Rust 重写）
 
-红果短剧工具，含 **CLI 与原生 GUI**（egui）。参考
+**在电脑上追红果短剧的桌面客户端**：封面卡片墙浏览 / 搜索 / 在线播放 / 离线下载，
+含 **GUI（egui 原生窗口）与 CLI** 两套界面。参考
 [zhoufuweigg/guoapp](https://github.com/zhoufuweigg/guoapp)
 （Flutter + Go 原生核心，约 5.4 万行）的核心业务逻辑，用 Rust 从零重写：
-release 下 CLI 约 **1.5 MB**、GUI 约 **4.0 MB**，无运行时依赖，无 ffmpeg / mpv 依赖。
+release 下 CLI 约 **1.5 MB**、GUI 约 **4.0 MB**，单文件、无运行时依赖。
+
+**三种看片方式**
+
+1. **在线播放**：不用下载，选「▶ 播放第1集」直接流式播放——自动解出 CENC
+   加密金钥交给 mpv（`mpv --demuxer-lavf-o=decryption_key=…`），逐帧与
+   本地解密文件一致（2026-10-12 实测）
+2. **离线下载**：下载后自动解密成**普通 mp4**，任何播放器可放、可剪、可离线
+3. **片库管理**：下载进度实时可见，完成后一键 ▶ 播放 / 打开目录
+
+| 目录卡片墙 | 详情 · 选集 · 下载 | 片库 · 播放 |
+| --- | --- | --- |
+| ![目录](docs/shots/catalog.png) | ![详情](docs/shots/detail.png) | ![片库](docs/shots/library.png) |
 
 > ⚠️ 免责声明：仅供学习研究。站源可用性、清晰度取决于源站及网络；本工具不解除
 > 源站 VIP 或任何授权限制。请勿用于商业用途。如有侵权请联系删除。
