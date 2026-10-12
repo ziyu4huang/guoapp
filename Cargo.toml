@@ -36,3 +36,8 @@ codegen-units = 1
 strip = true
 panic = "abort"
 opt-level = "z"
+
+[dev-dependencies]
+accesskit = "0.17"
+egui = "0.31"
+egui_kittest = { version = "0.31", features = ["eframe", "wgpu"] }

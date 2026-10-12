@@ -119,7 +119,8 @@ pub struct GuiApp {
 }
 
 impl GuiApp {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    #[doc(hidden)]
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         install_cjk_font(&cc.egui_ctx);
         let (tx, rx) = mpsc::channel();
         let store = Store::load();
@@ -678,12 +679,6 @@ impl eframe::App for GuiApp {
             });
         });
 
-        match self.tab {
-            Tab::Catalog => self.show_catalog(ctx),
-            Tab::Search => self.show_search(ctx),
-            Tab::Library => self.show_library(ctx),
-        }
-
         if self.detail.is_some() {
             let mut close = false;
             egui::SidePanel::right("detail")
@@ -695,6 +690,12 @@ impl eframe::App for GuiApp {
             if close {
                 self.detail = None;
             }
+        }
+
+        match self.tab {
+            Tab::Catalog => self.show_catalog(ctx),
+            Tab::Search => self.show_search(ctx),
+            Tab::Library => self.show_library(ctx),
         }
     }
 }
@@ -720,7 +721,7 @@ impl GuiApp {
                 }
             });
             ui.separator();
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            egui::ScrollArea::vertical().id_salt("catalog_scroll").show(ui, |ui| {
                 for genre in GENRES.iter() {
                     let dramas = match self.catalog.get(genre.key) {
                         Some(v) if !v.is_empty() => v.clone(),
@@ -804,7 +805,7 @@ impl GuiApp {
                     self.search_results.len()
                 ));
             }
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            egui::ScrollArea::vertical().id_salt("search_scroll").show(ui, |ui| {
                 let results = self.search_results.clone();
                 if let Some(d) = self.card_grid(ui, ctx, &results) {
                     open = Some(d);
@@ -823,7 +824,7 @@ impl GuiApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             if !self.downloads.is_empty() {
                 ui.heading("本次会话下载");
-                egui::ScrollArea::vertical()
+                egui::ScrollArea::vertical().id_salt("downloads_scroll")
                     .max_height(200.0)
                     .show(ui, |ui| {
                         let rows: Vec<DownloadItem> = self.downloads.iter().rev().cloned().collect();
@@ -868,7 +869,7 @@ impl GuiApp {
                 return;
             }
             let entries: Vec<LibraryEntry> = self.store.library.values().cloned().collect();
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            egui::ScrollArea::vertical().id_salt("library_scroll").show(ui, |ui| {
                 for entry in entries {
                     ui.horizontal(|ui| {
                         ui.label(format!("《{}》", entry.title));
@@ -907,8 +908,10 @@ impl GuiApp {
         let mut toggled: Option<usize> = None;
         let mut download_eps: Option<Vec<usize>> = None;
         let mut play_ep: Option<usize> = None;
+        let mut clear_selection = false;
+        let mut select_all = false;
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("detail_scroll").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.heading(&drama.title);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -962,17 +965,22 @@ impl GuiApp {
                 }
                 Some(chapters) => {
                     ui.label(format!("共 {} 集（点选要下载的集数）", chapters.len()));
-                    egui::Grid::new("episodes")
-                        .num_columns(10)
-                        .spacing([4.0, 4.0])
-                        .show(ui, |ui| {
-                            for chapter in &chapters {
-                                let mut picked = selected.contains(&chapter.index);
-                                if ui.toggle_value(&mut picked, format!("{}", chapter.index)).changed() {
-                                    toggled = Some(chapter.index);
-                                }
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                        for chapter in &chapters {
+                            let mut picked = selected.contains(&chapter.index);
+                            let label = egui::RichText::new(format!("{}", chapter.index)).size(11.0);
+                            if ui
+                                .add_sized(
+                                    [30.0, 20.0],
+                                    egui::widgets::Button::new(label).selected(picked),
+                                )
+                                .clicked()
+                            {
+                                toggled = Some(chapter.index);
                             }
-                        });
+                        }
+                    });
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         let picked_count = self
@@ -980,6 +988,12 @@ impl GuiApp {
                             .as_ref()
                             .map(|d| d.selected.len())
                             .unwrap_or(0);
+                        if ui.button("全不选").clicked() {
+                            clear_selection = true;
+                        }
+                        if ui.button("全选").clicked() {
+                            select_all = true;
+                        }
                         if ui
                             .button(format!("⬇ 下载选中（{}）", picked_count))
                             .clicked()
@@ -1004,6 +1018,15 @@ impl GuiApp {
                     detail.selected.remove(&index);
                 } else {
                     detail.selected.insert(index);
+                }
+            }
+        }
+        if clear_selection || select_all {
+            if let Some(detail) = self.detail.as_mut() {
+                if clear_selection {
+                    detail.selected.clear();
+                } else if let Some(chapters) = &detail.chapters {
+                    detail.selected = chapters.iter().map(|c| c.index).collect();
                 }
             }
         }
@@ -1077,10 +1100,11 @@ impl GuiApp {
                     egui::Color32::from_gray(100),
                 );
             }
-            if ui
-                .interact(rect, egui::Id::new(&drama.id), egui::Sense::click())
-                .clicked()
-            {
+            let card = ui.interact(rect, egui::Id::new(&drama.id), egui::Sense::click());
+            card.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &drama.title)
+            });
+            if card.clicked() {
                 clicked = true;
             }
             ui.add_sized(
