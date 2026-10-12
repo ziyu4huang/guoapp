@@ -9,7 +9,7 @@
 //! - stderr 收进日志文件，不再直喷终端/父进程日志；启动失败时由调用方取尾行展示。
 //! - IPC 客户端零依赖：Unix 用 `UnixStream`，Windows 用 `fs` 打开命名管道
 //!   （mpv 的管道按文件打开是官方支持用法）；每条命令新建连接、写完即关。
-//! - 播放器选择：`GUO_MPV` 环境变量 > IINA（仅 macOS，检测到就用，原生界面/PiP）
+//! - 播放器选择：默认 mpv；IINA 默认关闭（`GUO_PLAYER=iina` 显式开启）；`GUO_MPV` 指向任意兼容播放器
 //!   > PATH 里的 mpv。三者都是 mpv 内核，IPC 协议一致。
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -66,7 +66,9 @@ impl PlayerKind {
     }
 }
 
-/// 播放器解析：GUO_MPV 环境变量 > IINA（macOS 检测）> mpv。
+/// 播放器解析：mpv 是全平台一致的默认。IINA **默认关闭**（装了 IINA 的用户
+/// 不该在不知情下被换播放器），需显式 `GUO_PLAYER=iina` 开启；
+/// `GUO_MPV` 优先级最高，可指向任意 mpv 兼容播放器。
 /// 返回 (种类, 程序路径)；GUO_MPV 指向非标准路径时按 mpv 协议对待。
 pub fn resolve_player() -> (PlayerKind, String) {
     if let Ok(custom) = std::env::var("GUO_MPV") {
@@ -79,7 +81,10 @@ pub fn resolve_player() -> (PlayerKind, String) {
             return (kind, custom);
         }
     }
-    if cfg!(target_os = "macos") && Path::new("/Applications/IINA.app").exists() {
+    if std::env::var("GUO_PLAYER")
+        .map(|v| v.eq_ignore_ascii_case("iina"))
+        .unwrap_or(false)
+    {
         return (PlayerKind::Iina, PlayerKind::Iina.program().to_string());
     }
     (PlayerKind::Mpv, PlayerKind::Mpv.program().to_string())
@@ -478,12 +483,21 @@ mod tests {
     }
 
     #[test]
-    fn resolve_player_env_override_wins() {
-        // GUO_MPV 有值时永远按显式选择走（iina 关键字识别种类）
+    fn resolve_player_config_precedence() {
+        // env 是进程级全局:两个场景放同一个测试里顺序验证,避免并行线程互踩
+        // ① GUO_MPV 优先级最高
         std::env::set_var("GUO_MPV", "/usr/local/bin/mpv");
+        std::env::set_var("GUO_PLAYER", "iina");
         let (kind, program) = resolve_player();
         assert_eq!(kind, PlayerKind::Mpv);
         assert_eq!(program, "/usr/local/bin/mpv");
         std::env::remove_var("GUO_MPV");
-    }
-}
+        // ② GUO_PLAYER=iina 显式开启 IINA
+        let (kind, program) = resolve_player();
+        assert_eq!(kind, PlayerKind::Iina);
+        assert!(program.contains("iina-cli"));
+        std::env::remove_var("GUO_PLAYER");
+        // ③ 都没设 → mpv 默认(IINA 默认关闭)
+        let (kind, _) = resolve_player();
+        assert_eq!(kind, PlayerKind::Mpv);
+    }}

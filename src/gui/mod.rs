@@ -23,6 +23,63 @@ enum Tab {
     Library,
 }
 
+/// 封面缓存 + 抓取队列：4 个 worker 消费（一页 18+ 张不再同时开线程），
+/// 纹理按 URL 缓存（滚动/换页零重复解码）。
+struct CoverCache {
+    map: HashMap<String, Option<egui::TextureHandle>>,
+    pending: HashSet<String>,
+    queue_tx: mpsc::Sender<String>,
+}
+
+const COVER_WORKERS: usize = 4;
+
+impl CoverCache {
+    fn new(msg_tx: mpsc::Sender<Msg>) -> Self {
+        let (queue_tx, queue_rx) = mpsc::channel::<String>();
+        let queue_rx = Arc::new(Mutex::new(queue_rx));
+        for _ in 0..COVER_WORKERS {
+            let queue_rx = queue_rx.clone();
+            let msg_tx = msg_tx.clone();
+            thread::spawn(move || loop {
+                let url = queue_rx.lock().ok().and_then(|g| g.recv().ok());
+                let Some(url) = url else { return };
+                let rgba = fetch_cover(&url);
+                let _ = msg_tx.send(Msg::Cover { url, rgba });
+            });
+        }
+        CoverCache { map: HashMap::new(), pending: HashSet::new(), queue_tx }
+    }
+
+    /// 命中缓存返回纹理；未命中入队抓取并返回 None（卡片画「…」占位）。
+    fn texture(&mut self, url: &str) -> Option<egui::TextureHandle> {
+        if url.is_empty() {
+            return None;
+        }
+        if let Some(handle) = self.map.get(url) {
+            return handle.clone();
+        }
+        if self.pending.insert(url.to_string()) {
+            let _ = self.queue_tx.send(url.to_string());
+        }
+        None
+    }
+
+    /// 后台抓取完成：落地纹理（下次帧即显示，配合 update 的 repaint 触发）。
+    fn deliver(&mut self, ctx: &egui::Context, url: String, rgba: Option<(Vec<u8>, usize, usize)>) {
+        self.pending.remove(&url);
+        let handle = rgba.and_then(|(bytes, w, h)| {
+            let image = egui::ColorImage::from_rgba_unmultiplied([w, h], &bytes);
+            Some(ctx.load_texture("cover", image, Default::default()))
+        });
+        self.map.insert(url, handle);
+    }
+
+    fn clear(&mut self) {
+        self.map.clear();
+        self.pending.clear();
+    }
+}
+
 struct DetailState {
     drama: Drama,
     chapters: Option<Vec<Chapter>>,
@@ -135,8 +192,7 @@ pub struct GuiApp {
     search_results: Vec<Drama>,
     search_busy: bool,
     detail: Option<DetailState>,
-    covers: HashMap<String, Option<egui::TextureHandle>>,
-    covers_pending: HashSet<String>,
+    cover_cache: CoverCache,
     downloads: Vec<DownloadItem>,
     status: (String, std::time::Instant),
     /// 串流播放单实例会话（None=未启动/已退出）。
@@ -166,6 +222,7 @@ impl GuiApp {
                 run_download_job(job, tx.clone());
             });
         }
+        let cover_cache = CoverCache::new(tx.clone());
         let mut app = GuiApp {
             store,
             client,
@@ -181,8 +238,7 @@ impl GuiApp {
             search_results: Vec::new(),
             search_busy: false,
             detail: None,
-            covers: HashMap::new(),
-            covers_pending: HashSet::new(),
+            cover_cache,
             downloads: Vec::new(),
             status: ("就绪".into(), std::time::Instant::now()),
             player: None,
@@ -371,24 +427,6 @@ impl GuiApp {
         });
     }
 
-    fn cover_texture(&mut self, _ctx: &egui::Context, url: &str) -> Option<egui::TextureHandle> {
-        if url.is_empty() {
-            return None;
-        }
-        if let Some(handle) = self.covers.get(url) {
-            return handle.clone();
-        }
-        if self.covers_pending.insert(url.to_string()) {
-            let tx = self.tx.clone();
-            let url = url.to_string();
-            thread::spawn(move || {
-                let rgba = fetch_cover(&url);
-                let _ = tx.send(Msg::Cover { url, rgba });
-            });
-        }
-        None
-    }
-
     fn apply_msg(&mut self, ctx: &egui::Context, msg: Msg) {
         match msg {
             Msg::CatalogPage { genre, dramas, cursor } => {
@@ -443,12 +481,7 @@ impl GuiApp {
                 }
             }
             Msg::Cover { url, rgba } => {
-                self.covers_pending.remove(&url);
-                let handle = rgba.and_then(|(bytes, w, h)| {
-                    let image = egui::ColorImage::from_rgba_unmultiplied([w, h], &bytes);
-                    Some(ctx.load_texture("cover", image, Default::default()))
-                });
-                self.covers.insert(url, handle);
+                self.cover_cache.deliver(ctx, url, rgba);
             }
             Msg::DownloadProgress { drama_id, ep, frac } => {
                 if let Some(item) = self
@@ -796,8 +829,21 @@ impl eframe::App for GuiApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let mut got_msg = false;
         while let Ok(msg) = self.rx.try_recv() {
             self.apply_msg(ctx, msg);
+            got_msg = true;
+        }
+        // 后台线程送到的消息（封面/进度/播放事件）必须立即上屏：
+        // egui 无输入事件时在睡觉，不触发重绘 = 封面要等鼠标动了才出现。
+        if got_msg {
+            ctx.request_repaint();
+        }
+        // 还有后台工作在飞时保持低频帧循环
+        if !self.cover_cache.pending.is_empty()
+            || self.downloads.iter().any(|d| d.status == DlStatus::Active)
+        {
+            ctx.request_repaint_after(std::time::Duration::from_millis(300));
         }
 
         egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
@@ -812,8 +858,7 @@ impl eframe::App for GuiApp {
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.small_button("清空封面缓存").clicked() {
-                        self.covers.clear();
-                        self.covers_pending.clear();
+                        self.cover_cache.clear();
                     }
                 });
             });
@@ -877,6 +922,8 @@ impl eframe::App for GuiApp {
 
 impl GuiApp {
     fn show_catalog(&mut self, ctx: &egui::Context) {
+        // 字段级拆借:cover_cache 可变、catalog 只读——同一闭包内共存,免整帧 clone
+        let Self { cover_cache, catalog, catalog_loading, catalog_exhausted, .. } = self;
         let mut open: Option<Drama> = None;
         let mut more: Option<String> = None;
         let mut refresh = false;
@@ -884,9 +931,9 @@ impl GuiApp {
             ui.horizontal(|ui| {
                 ui.label("分类：");
                 for genre in GENRES.iter() {
-                    let count = self.catalog.get(genre.key).map(|v| v.len()).unwrap_or(0);
+                    let count = catalog.get(genre.key).map(|v| v.len()).unwrap_or(0);
                     let label = format!("{} ({})", genre.name, count);
-                    let busy = self.catalog_loading.contains(genre.key);
+                    let busy = catalog_loading.contains(genre.key);
                     if ui.selectable_label(!busy, label).clicked() && count == 0 && !busy {
                         more = Some(genre.key.to_string());
                     }
@@ -898,21 +945,21 @@ impl GuiApp {
             ui.separator();
             egui::ScrollArea::vertical().id_salt("catalog_scroll").show(ui, |ui| {
                 for genre in GENRES.iter() {
-                    let dramas = match self.catalog.get(genre.key) {
-                        Some(v) if !v.is_empty() => v.clone(),
-                        _ => continue,
-                    };
+                    let Some(dramas) = catalog.get(genre.key) else { continue };
+                    if dramas.is_empty() {
+                        continue;
+                    }
                     ui.add_space(6.0);
                     ui.heading(genre.name);
                     ui.add_space(2.0);
-                    if let Some(d) = self.card_grid(ui, ctx, &dramas) {
+                    if let Some(d) = cover_cache.card_grid(ui, dramas) {
                         open = Some(d);
                     }
                 }
-                if self.catalog.values().all(|v| v.is_empty()) {
+                if catalog.values().all(|v| v.is_empty()) {
                     ui.add_space(30.0);
                     ui.vertical_centered(|ui| {
-                        if self.catalog_loading.is_empty() {
+                        if catalog_loading.is_empty() {
                             ui.label("目录为空或加载失败（点上方分类重试）");
                         } else {
                             ui.spinner();
@@ -923,10 +970,10 @@ impl GuiApp {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     for genre in GENRES.iter() {
-                        let busy = self.catalog_loading.contains(genre.key);
+                        let busy = catalog_loading.contains(genre.key);
                         let label = if busy {
                             format!("{} …", genre.name)
-                        } else if self.catalog_exhausted.contains(genre.key) {
+                        } else if catalog_exhausted.contains(genre.key) {
                             format!("{} 已到底", genre.name)
                         } else {
                             format!("更多{}", genre.name)
@@ -957,32 +1004,32 @@ impl GuiApp {
     }
 
     fn show_search(&mut self, ctx: &egui::Context) {
+        let Self { cover_cache, search_input, search_busy, search_submitted, search_results, .. } = self;
         let mut submit = false;
         let mut open: Option<Drama> = None;
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
                 let response = ui.add(
-                    egui::TextEdit::singleline(&mut self.search_input)
+                    egui::TextEdit::singleline(search_input)
                         .hint_text("输入剧名，回车搜索")
                         .desired_width(360.0),
                 );
                 submit = (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
                     || ui.button("搜索").clicked();
-                if self.search_busy {
+                if *search_busy {
                     ui.spinner();
                 }
             });
             ui.separator();
-            if !self.search_submitted.is_empty() {
+            if !search_submitted.is_empty() {
                 ui.label(format!(
                     "“{}” 共 {} 部",
-                    self.search_submitted,
-                    self.search_results.len()
+                    search_submitted,
+                    search_results.len()
                 ));
             }
             egui::ScrollArea::vertical().id_salt("search_scroll").show(ui, |ui| {
-                let results = self.search_results.clone();
-                if let Some(d) = self.card_grid(ui, ctx, &results) {
+                if let Some(d) = cover_cache.card_grid(ui, search_results) {
                     open = Some(d);
                 }
             });
@@ -1002,7 +1049,7 @@ impl GuiApp {
                 egui::ScrollArea::vertical().id_salt("downloads_scroll")
                     .max_height(200.0)
                     .show(ui, |ui| {
-                        let rows: Vec<DownloadItem> = self.downloads.iter().rev().cloned().collect();
+                        let rows: Vec<&DownloadItem> = self.downloads.iter().rev().collect();
                         egui::Grid::new("downloads")
                             .num_columns(4)
                             .striped(true)
@@ -1043,7 +1090,7 @@ impl GuiApp {
                 ui.vertical_centered(|ui| ui.label("本地片库为空"));
                 return;
             }
-            let entries: Vec<LibraryEntry> = self.store.library.values().cloned().collect();
+            let entries: Vec<&LibraryEntry> = self.store.library.values().collect();
             egui::ScrollArea::vertical().id_salt("library_scroll").show(ui, |ui| {
                 for entry in entries {
                     ui.horizontal(|ui| {
@@ -1072,11 +1119,13 @@ impl GuiApp {
     }
 
     fn show_detail(&mut self, ui: &mut egui::Ui) -> bool {
-        let Some(detail) = self.detail.as_ref() else { return false };
-        let drama = detail.drama.clone();
-        let chapters = detail.chapters.clone();
-        let selected = detail.selected.clone();
-        let error = detail.error.clone();
+        // 字段级拆借:chapters/selected 全程只读引用,不再每帧整份克隆
+        let Self { detail, cover_cache, now_playing, autoplay_next, .. } = self;
+        let Some(detail) = detail.as_ref() else { return false };
+        let drama = &detail.drama;
+        let chapters = detail.chapters.as_ref();
+        let selected = &detail.selected;
+        let error = detail.error.as_ref();
         let mut close = false;
         let mut toggled: Option<usize> = None;
         let mut download_eps: Option<Vec<usize>> = None;
@@ -1094,7 +1143,7 @@ impl GuiApp {
                 });
             });
             ui.horizontal(|ui| {
-                let texture = self.cover_texture(ui.ctx(), &drama.cover);
+                let texture = cover_cache.texture(&drama.cover);
                 match texture {
                     Some(handle) => {
                         ui.add(egui::Image::new(egui::load::SizedTexture::new(
@@ -1140,11 +1189,10 @@ impl GuiApp {
                     ui.label(format!("共 {} 集（点选要下载的集数）", chapters.len()));
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-                        for chapter in &chapters {
+                        for chapter in chapters.iter() {
                             let picked = selected.contains(&chapter.index);
                             // 正在串流播放的这一集：金色 + ▶ 前缀（下载勾选样式不受影响）
-                            let playing_this_ep = self
-                                .now_playing
+                            let playing_this_ep = now_playing
                                 .as_ref()
                                 .filter(|np| np.drama_id == drama.id && np.ep == chapter.index)
                                 .is_some();
@@ -1171,11 +1219,7 @@ impl GuiApp {
                     });
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        let picked_count = self
-                            .detail
-                            .as_ref()
-                            .map(|d| d.selected.len())
-                            .unwrap_or(0);
+                        let picked_count = detail.selected.len();
                         if ui.button("全不选").clicked() {
                             clear_selection = true;
                         }
@@ -1195,8 +1239,7 @@ impl GuiApp {
                         }
                         // 串流播放：动态标签 + 下一集 + 连播开关。
                         // 正在播本剧 → 主按钮变「下一集」，另给「重播本集」入口。
-                        let playing_here = self
-                            .now_playing
+                        let playing_here = now_playing
                             .as_ref()
                             .filter(|np| np.drama_id == drama.id)
                             .map(|np| np.ep)
@@ -1213,7 +1256,7 @@ impl GuiApp {
                         } else if ui.button("▶ 播放第1集").clicked() {
                             play_ep = Some(1);
                         }
-                        ui.checkbox(&mut self.autoplay_next, "连播");
+                        ui.checkbox(autoplay_next, "连播");
                         if let Some(cur_ep) = playing_here {
                             ui.colored_label(
                                 egui::Color32::from_rgb(255, 200, 90),
@@ -1255,11 +1298,10 @@ impl GuiApp {
 // ---------------------------------------------------------------------------
 // Card grid
 
-impl GuiApp {
+impl CoverCache {
     fn card_grid(
         &mut self,
         ui: &mut egui::Ui,
-        ctx: &egui::Context,
         dramas: &[Drama],
     ) -> Option<Drama> {
         if dramas.is_empty() {
@@ -1271,7 +1313,7 @@ impl GuiApp {
             let mut picked: Option<Drama> = None;
             ui.horizontal(|ui| {
                 for drama in row {
-                    if let Some(d) = self.card(ui, ctx, drama) {
+                    if let Some(d) = self.card(ui, drama) {
                         picked = Some(d);
                     }
                 }
@@ -1283,8 +1325,8 @@ impl GuiApp {
         open
     }
 
-    fn card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, drama: &Drama) -> Option<Drama> {
-        let texture = self.cover_texture(ctx, &drama.cover);
+    fn card(&mut self, ui: &mut egui::Ui, drama: &Drama) -> Option<Drama> {
+        let texture = self.texture(&drama.cover);
         let mut clicked = false;
         ui.vertical(|ui| {
             let (rect, _) =
@@ -1299,7 +1341,7 @@ impl GuiApp {
                 );
             } else {
                 painter.rect_filled(rect, 4.0, egui::Color32::from_gray(38));
-                let label = if self.covers_pending.contains(&drama.cover) {
+                let label = if self.pending.contains(&drama.cover) {
                     "…"
                 } else {
                     "无封面"

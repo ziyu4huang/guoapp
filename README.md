@@ -47,9 +47,12 @@ cargo run --release --bin guo-gui     # 或直接运行 target/release/guo-gui
   同一窗口 `loadfile` 无缝换集；窗口标题/OSC 显示《剧名》第N集；详情面板
   高亮正在播的集数、提供「⏭ 下一集」与「连播」开关（播完自动接下一集）；
   `--hwdec=auto`（macOS VideoToolbox）修复 HEVC 软解丢帧闪跳；播放器 stderr
-  收进数据目录 `mpv-last.log`；检测到 [IINA](https://iina.io/) 时自动优先使用
-  （原生 macOS 界面/画中画），`GUO_MPV` 环境变量可指定任意 mpv 兼容播放器，
-  `GUO_MPV_ARGS` 可追加 mpv 参数
+  收进数据目录 `mpv-last.log`；播放器默认 mpv，想用 [IINA](https://iina.io/)
+  （原生 macOS 界面/画中画）设环境变量 `GUO_PLAYER=iina` 显式开启；
+  `GUO_MPV` 可指定任意 mpv 兼容播放器，`GUO_MPV_ARGS` 追加 mpv 参数
+- **界面效率与体验（v0.3.1）**：后台消息即时上屏（封面/进度/播放事件不再等
+  鼠标动才刷新）；封面抓取 4 并发队列（一页 18+ 张不再同时开线程）；目录/
+  搜索/详情/片库列表渲染零逐帧克隆（之前每帧克隆全部剧集数据）
 - 本地已下载文件用系统默认播放器
 - 数据与 CLI 共用：`$GUOAPP_DATA` / `~/.local/share/guoapp`（macOS
   `~/Library/Application Support/guoapp`），下载状态两端互通
