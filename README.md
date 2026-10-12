@@ -18,6 +18,9 @@ release 下 CLI 约 **1.5 MB**、GUI 约 **4.0 MB**，单文件、无运行时�
 | --- | --- | --- |
 | ![目录](docs/shots/catalog.png) | ![详情](docs/shots/detail.png) | ![片库](docs/shots/library.png) |
 
+**🎬 视频演示**:[在电脑上追短剧——全功能演示](https://www.bilibili.com/video/BV1bCpZ6BEtb)(B站) ·
+[YouTube](https://youtu.be/jkY7YnxR-b4)
+
 > ⚠️ 免责声明：仅供学习研究。站源可用性、清晰度取决于源站及网络；本工具不解除
 > 源站 VIP 或任何授权限制。请勿用于商业用途。如有侵权请联系删除。
 
