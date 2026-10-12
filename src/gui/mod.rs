@@ -83,6 +83,7 @@ enum Msg {
         label: String,
         url: String,
         referer: String,
+        key: Option<String>,
     },
     Status(String),
 }
@@ -323,6 +324,7 @@ impl GuiApp {
                     label,
                     url: resolved.url,
                     referer: resolved.referer,
+                    key: resolved.cenc_key.map(hex::encode),
                 });
             }
             Err(err) => {
@@ -418,12 +420,13 @@ impl GuiApp {
                     self.record_library_episode(&drama_id, ep, &file, kind, quality, &dir);
                 }
             }
-            Msg::PlayReady { label, url, referer } => {
-                let started = std::process::Command::new("mpv")
-                    .arg(&url)
-                    .arg(format!("--referrer={}", referer))
-                    .spawn();
-                match started {
+            Msg::PlayReady { label, url, referer, key } => {
+                let mut cmd = std::process::Command::new("mpv");
+                cmd.arg(&url).arg(format!("--referrer={}", referer));
+                if let Some(key) = &key {
+                    cmd.arg(format!("--demuxer-lavf-o=decryption_key={}", key));
+                }
+                match cmd.spawn() {
                     Ok(_) => self.set_status(format!("{} → mpv 已启动", label)),
                     Err(_) => self.set_status("未找到 mpv（brew install mpv），或改用下载后本地播放"),
                 }

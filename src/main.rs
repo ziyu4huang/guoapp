@@ -426,6 +426,9 @@ fn play(client: &HgClient, store: &Store, rest: &[String]) -> i32 {
             cmd.arg(&media.url);
             if player == "mpv" {
                 cmd.arg(format!("--referrer={}", media.referer));
+                if let Some(key) = &media.cenc_key {
+                    cmd.arg(format!("--demuxer-lavf-o=decryption_key={}", hex::encode(key)));
+                }
             } else {
                 cmd.arg("--mpv-referrer").arg(&media.referer);
             }

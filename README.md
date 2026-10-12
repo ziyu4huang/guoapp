@@ -22,7 +22,10 @@ cargo run --release --bin guo-gui     # 或直接运行 target/release/guo-gui
 - **片库**：已下载剧目列表，每集 ▶ 按钮用系统播放器打开，「打开目录」直达文件夹
 - 封面：CDN 返回 HEIC，macOS 上自动经系统 `sips` 转码（零额外依赖）；
   非 macOS 需站源返回 jpeg/webp 才有封面
-- 播放在线流依赖 mpv（`brew install mpv`）；本地已下载文件用系统默认播放器
+- 在线播放：依赖 mpv（`brew install mpv`）；红果流是 CENC 加密的，工具自动把
+  spade_a 解出的 AES 金钥经 `--demuxer-lavf-o=decryption_key` 交给 mpv 的
+  mov 解复用器，逐帧 md5 与下载后本地播放完全一致（2026-10-12 实测）
+- 本地已下载文件用系统默认播放器
 - 数据与 CLI 共用：`$GUOAPP_DATA` / `~/.local/share/guoapp`（macOS
   `~/Library/Application Support/guoapp`），下载状态两端互通
 
@@ -59,7 +62,7 @@ guo search 闪婚                      # 官网搜索 + 名称索引合并
 guo suggest 重生                     # 搜索联想
 guo detail hongguo:7632003395225668670
 guo resolve <剧ID> 1                 # 打印播放地址 + CENC 密钥
-guo play <剧ID> 1 --player mpv       # 在线播放（mpv --referrer）
+guo play <剧ID> 1 --player mpv       # 在线播放（自动传 Referer + CENC 解密金钥）
 guo download <剧ID> --eps 1-5,8      # 离线下载（缺省全部分集）
 guo download <剧ID> --quality 720    # 指定画质
 guo library                          # 本地已下载剧目
