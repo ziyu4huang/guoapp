@@ -1,0 +1,107 @@
+name: release
+
+# tag push（v*）→ 三平台构建 → 打包 → 自动发 GitHub Release
+# 产物命名：guoapp-<tag>-{macos-arm64,macos-x64,windows-x64,linux-x64}.{zip,tar.gz}
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
+
+  build-macos:
+    needs: create-release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build arm64 + x64
+        run: |
+          rustup target add x86_64-apple-darwin
+          cargo build --release
+          cargo build --release --target x86_64-apple-darwin
+      - name: Package arm64 (CLI + Guo.app)
+        run: |
+          VER="${GITHUB_REF_NAME}"
+          DIR="dist/guoapp-${VER}-macos-arm64"
+          mkdir -p "${DIR}"
+          cp target/release/guo "${DIR}/"
+          APP="${DIR}/Guo.app/Contents/MacOS"
+          mkdir -p "${APP}"
+          cp target/release/guo-gui "${APP}/guo-gui"
+          sed "s/__VER__/${VER#v}/" packaging/Info.plist > "${DIR}/Guo.app/Contents/Info.plist"
+          cp README.md LICENSE "${DIR}/"
+          (cd dist && zip -qry "guoapp-${VER}-macos-arm64.zip" "guoapp-${VER}-macos-arm64")
+      - name: Package x64 (CLI + Guo.app)
+        run: |
+          VER="${GITHUB_REF_NAME}"
+          DIR="dist/guoapp-${VER}-macos-x64"
+          mkdir -p "${DIR}"
+          cp target/x86_64-apple-darwin/release/guo "${DIR}/"
+          APP="${DIR}/Guo.app/Contents/MacOS"
+          mkdir -p "${APP}"
+          cp target/x86_64-apple-darwin/release/guo-gui "${APP}/guo-gui"
+          sed "s/__VER__/${VER#v}/" packaging/Info.plist > "${DIR}/Guo.app/Contents/Info.plist"
+          cp README.md LICENSE "${DIR}/"
+          (cd dist && zip -qry "guoapp-${VER}-macos-x64.zip" "guoapp-${VER}-macos-x64")
+      - name: Upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/*.zip --clobber
+
+  build-windows:
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - name: Package
+        shell: pwsh
+        run: |
+          $ver = $env:GITHUB_REF_NAME
+          $dir = "dist/guoapp-$ver-windows-x64"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item target/release/guo.exe $dir/
+          Copy-Item target/release/guo-gui.exe $dir/
+          Copy-Item README.md, LICENSE $dir/
+          Compress-Archive -Path $dir -DestinationPath "dist/guoapp-$ver-windows-x64.zip"
+      - name: Upload asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: gh release upload "$env:GITHUB_REF_NAME" "dist/guoapp-$env:GITHUB_REF_NAME-windows-x64.zip" --clobber
+
+  build-linux:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev
+      - run: cargo build --release
+      - name: Package
+        run: |
+          VER="${GITHUB_REF_NAME}"
+          DIR="dist/guoapp-${VER}-linux-x64"
+          mkdir -p "${DIR}"
+          cp target/release/guo target/release/guo-gui README.md LICENSE "${DIR}/"
+          tar -czf "dist/guoapp-${VER}-linux-x64.tar.gz" -C dist "guoapp-${VER}-linux-x64"
+      - name: Upload asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" "dist/guoapp-${GITHUB_REF_NAME}-linux-x64.tar.gz" --clobber

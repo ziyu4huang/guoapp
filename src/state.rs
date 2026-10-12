@@ -54,6 +54,12 @@ fn default_dir() -> PathBuf {
             return PathBuf::from(xdg).join("guoapp");
         }
     }
+    if cfg!(target_os = "windows") {
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_else(|_| ".".into());
+        return PathBuf::from(home).join("AppData").join("Local").join("guoapp");
+    }
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     if cfg!(target_os = "macos") {
         PathBuf::from(home).join("Library/Application Support/guoapp")

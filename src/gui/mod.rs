@@ -421,14 +421,16 @@ impl GuiApp {
                 }
             }
             Msg::PlayReady { label, url, referer, key } => {
-                let mut cmd = std::process::Command::new("mpv");
+                let player = std::env::var("GUO_MPV").unwrap_or_else(|_| "mpv".into());
+                let mut cmd = std::process::Command::new(&player);
                 cmd.arg(&url).arg(format!("--referrer={}", referer));
                 if let Some(key) = &key {
                     cmd.arg(format!("--demuxer-lavf-o=decryption_key={}", key));
                 }
                 match cmd.spawn() {
-                    Ok(_) => self.set_status(format!("{} → mpv 已启动", label)),
-                    Err(_) => self.set_status("未找到 mpv（brew install mpv），或改用下载后本地播放"),
+                    Ok(_) => self.set_status(format!("{} → {} 已启动", label, player)),
+                    Err(_) => self
+                        .set_status("未找到 mpv（mpv.io 或设 GUO_MPV 指向 mpv 可执行文件），或改用下载后本地播放"),
                 }
             }
             Msg::Status(text) => self.set_status(text),
@@ -544,6 +546,18 @@ fn run_download_job(job: DownloadJob, tx: mpsc::Sender<Msg>) {
             });
         }
     }
+}
+
+/// Open a path (directory or media file) with the platform file manager or
+/// default player: `open` on macOS, `explorer` on Windows, `xdg-open` on Linux.
+fn open_in_system(path: &std::path::Path) {
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(target_os = "windows")]
+    let program = "explorer";
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let program = "xdg-open";
+    let _ = std::process::Command::new(program).arg(path).spawn();
 }
 
 /// Fetch a cover image and decode to RGBA at 220x294. HEIC covers (the CDN
@@ -878,8 +892,7 @@ impl GuiApp {
                         ui.label(format!("《{}》", entry.title));
                         ui.weak(format!("{}集", entry.episodes.len()));
                         if ui.small_button("打开目录").clicked() {
-                            let _ =
-                                std::process::Command::new("open").arg(&entry.dir).spawn();
+                            open_in_system(&PathBuf::from(&entry.dir));
                         }
                         ui.separator();
                         for ep in &entry.episodes {
@@ -891,8 +904,7 @@ impl GuiApp {
                                 .on_hover_text(path.display().to_string())
                                 .clicked()
                             {
-                                let _ =
-                                    std::process::Command::new("open").arg(&path).spawn();
+                                open_in_system(&path);
                             }
                         }
                     });
@@ -971,7 +983,7 @@ impl GuiApp {
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
                         for chapter in &chapters {
-                            let mut picked = selected.contains(&chapter.index);
+                            let picked = selected.contains(&chapter.index);
                             let label = egui::RichText::new(format!("{}", chapter.index)).size(11.0);
                             if ui
                                 .add_sized(

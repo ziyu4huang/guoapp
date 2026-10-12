@@ -6,7 +6,7 @@
 release 下 CLI 约 **1.5 MB**、GUI 约 **4.0 MB**，无运行时依赖，无 ffmpeg / mpv 依赖。
 
 > ⚠️ 免责声明：仅供学习研究。站源可用性、清晰度取决于源站及网络；本工具不解除
-> 源站 VIP 或任何授权限制。请勿用于商业用途。
+> 源站 VIP 或任何授权限制。请勿用于商业用途。如有侵权请联系删除。
 
 ## 原生 GUI（guo-gui）
 
@@ -42,6 +42,28 @@ cargo run --release --bin guo-gui     # 或直接运行 target/release/guo-gui
 
 未移植：Flutter UI、弹幕、画中画、画质增强、局域网同步、其他站源
 （韩小圈/鬼片/青空/黄豆等）。要的就是精小：只保留红果一条完整闭环。
+
+## 下载安装（预编译）
+
+从 [GitHub Releases](https://github.com/ziyu4huang/guoapp/releases) 下载对应平台的压缩包
+（tag push 后由 GitHub Actions 自动构建发布）：
+
+| 压缩包 | 平台 | 内容 |
+| --- | --- | --- |
+| `guoapp-v*-macos-arm64.zip` | macOS（Apple Silicon） | `guo`（CLI）+ `Guo.app`（GUI） |
+| `guoapp-v*-macos-x64.zip` | macOS（Intel） | 同上 |
+| `guoapp-v*-windows-x64.zip` | Windows 10/11 x64 | `guo.exe` + `guo-gui.exe` |
+| `guoapp-v*-linux-x64.tar.gz` | Linux x64（glibc） | `guo` + `guo-gui` |
+
+- **macOS**：解压后把 `Guo.app` 拖进「应用程序」即可（未签名，首次打开右键 →
+  打开；或 `xattr -cr Guo.app`）。CLI 想全局可用可 `cp guo /usr/local/bin/`。
+- **Windows**：解压到任意目录直接运行 `guo-gui.exe`。在线播放需
+  [mpv](https://mpv.io/)：安装后确保 `mpv` 在 PATH，或设环境变量
+  `GUO_MPV` 指向 `mpv.exe` 完整路径。数据目录为
+  `%USERPROFILE%\AppData\Local\guoapp`。
+- **Linux**：解压后 `./guo-gui` 需 X11/Wayland 桌面环境；封面 HEIC 解码
+  依赖 macOS `sips`，其他平台站源返回 jpeg/webp 时才有封面（当前已知限制）。
+- **源码构建**：任何平台 `cargo build --release` 即可，无系统依赖。
 
 ## 构建
 
