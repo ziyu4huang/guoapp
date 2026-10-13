@@ -286,6 +286,97 @@ fn ipc_session_live() {
     eprintln!("✓ 会话退出干净");
 }
 
+/// eof 后进程必须存活（--keep-open=yes）且 IPC 仍可 loadfile 接集——
+/// 连播不断窗/不假播放的根基（旧版 mpv 默认 eof 退出，loadfile 打进垂死进程
+/// 会被接受但随即退出 = UI 显示在播实际黑屏）。本地 2s 样片，不依赖网络。
+/// 运行：cargo test --test record_gif eof_keepopen -- --ignored --nocapture
+#[test]
+#[ignore]
+fn eof_keepopen_session_alive_then_loadfile_next() {
+    use guo::player::{self, PlayItem, PlayerEvent};
+
+    std::env::set_var("GUO_MPV_ARGS", "--vo=null --ao=null");
+    let dir = std::env::temp_dir().join(format!("guo-eof-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("tmp dir");
+    let clip = |name: &str, color: &str| {
+        let p = dir.join(name);
+        let st = std::process::Command::new("ffmpeg")
+            .args([
+                "-y", "-loglevel", "error",
+                "-f", "lavfi", "-i", &format!("color=c={color}:s=320x240:d=2"),
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+                "-pix_fmt", "yuv420p", "-shortest", "-c:v", "libx264",
+            ])
+            .arg(&p)
+            .status()
+            .expect("ffmpeg");
+        assert!(st.success(), "ffmpeg 生成失败: {}", name);
+        p
+    };
+    let ep1 = clip("ep1.mp4", "red");
+    let ep2 = clip("ep2.mp4", "blue");
+    let item = |p: &std::path::Path, title: &str| PlayItem {
+        url: p.display().to_string(),
+        referer: String::new(),
+        key: None,
+        title: title.into(),
+    };
+
+    let (kind, program) = player::resolve_player();
+    let ipc = player::ipc_path();
+    let log = dir.join("mpv-eof.log");
+    eprintln!("step1: launch (keep-open 会话)");
+    let mut session =
+        player::PlayerSession::launch(kind, &program, &item(&ep1, "测试第1集"), &ipc, &log)
+            .expect("launch mpv");
+
+    let running = session.running_flag();
+    let (ev_tx, ev_rx) = std::sync::mpsc::channel();
+    let ev_ipc = session.ipc.clone();
+    std::thread::spawn(move || {
+        player::event_loop(&ev_ipc, &running, move |ev| ev_tx.send(ev).is_ok())
+    });
+
+    let wait_ended = |what: &str, secs: u64| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+        loop {
+            match ev_rx.recv_timeout(std::time::Duration::from_secs(1)) {
+                Ok(PlayerEvent::Ended) => return,
+                Ok(_) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if std::time::Instant::now() > deadline {
+                        panic!("{what}: {}s 内未等到 eof（本地 2s 片应早已播完）", secs);
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    panic!("{what}: 事件通道关闭（reader 线程已退出）")
+                }
+            }
+        }
+    };
+    // 注：本地 2s 片加载快过 IPC 连线建立，file-loaded 会在 reader 连上之前
+    // 发完（真实网络串流则不会）——所以「开播」无法用事件断言，改等自然播完
+    // 的 eof，它同时证明「文件真的加载并播到了底」，是更强的证据。
+    wait_ended("第一集播完", 30);
+    eprintln!("✓ 第一集自然播完（eof）");
+
+    // 核心：eof 后——keep-open 让进程活着，IPC 仍可用
+    assert!(session.process_alive(), "eof 后进程必须存活（--keep-open=yes 失效？）");
+    assert!(session.ipc_ready(), "eof 后 IPC 必须仍可达");
+    eprintln!("✓ eof 后进程存活 + IPC 可达（旧版此处 mpv 已退出 = 连播 bug 根源）");
+
+    // eof 后接第二集：同窗口 loadfile replace（连播的真实路径）；
+    // 第二集也必须播到底（Ended）= 真加载真播放，不是「接受了命令但没播」
+    session.load(&item(&ep2, "测试第2集")).expect("eof 后 loadfile 必须成功");
+    wait_ended("第二集播完", 30);
+    eprintln!("✓ eof 后同一窗口接集成功且播到底（连播无缝）");
+
+    session.quit();
+    assert!(!session.process_alive(), "quit 后进程应已退出");
+    let _ = std::fs::remove_dir_all(&dir);
+    eprintln!("✓ 会话退出干净");
+}
+
 /// GUI 播放链路冒烟:点「▶ 播放第1集」→ 状态「▶ 正在播放」→ 详情面板出现
 /// 「正在播放:第1集」+ 集数格「▶1」标记 + 底栏常驻播放指示。
 /// GUO_MPV_ARGS=--vo=null --ao=null 由测试自身注入(无头环境 mpv 真窗口起不来)。

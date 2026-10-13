@@ -57,6 +57,10 @@ cargo run --release --bin guo-gui     # 或直接运行 target/release/guo-gui
 - **界面效率与体验（v0.3.1）**：后台消息即时上屏（封面/进度/播放事件不再等
   鼠标动才刷新）；封面抓取 4 并发队列（一页 18+ 张不再同时开线程）；目录/
   搜索/详情/片库列表渲染零逐帧克隆（之前每帧克隆全部剧集数据）
+- **串流缓冲与连播（v0.3.2）**：起播先缓冲 3 秒、预读 60s/上限 128MiB、CDN
+  断线自动重连、15s 网络超时兜底——网络抖动少卡顿；播放器 `--keep-open=yes`
+  播完不退进程（经 `eof-reached` 属性侦测播完），连播/下一集永远打在活会话上，
+  同窗口无缝接集，消除「UI 显示在播实际已退出」的假播放
 - 本地已下载文件用系统默认播放器
 - 数据与 CLI 共用：`$GUOAPP_DATA` / `~/.local/share/guoapp`（macOS
   `~/Library/Application Support/guoapp`），下载状态两端互通

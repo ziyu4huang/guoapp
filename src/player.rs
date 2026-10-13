@@ -3,6 +3,11 @@
 //! 设计：
 //! - 会话只 spawn 一次；换集走 IPC `loadfile replace`，不再每集开新窗口
 //!   （旧行为每集一个进程 = 多窗口闪跳的来源之一）。
+//! - `--keep-open=yes`：播完 eof 不退出进程（mpv 默认会退出）。这样连播/下一集
+//!   永远打在活会话上（loadfile replace 无缝接集），消除「eof 后进程垂死、
+//!   loadfile 被接受但随即退出」的假播放竞态。
+//! - 缓冲策略（session_option_args）：起播先缓冲 3s、预读 60s/上限 128MiB、
+//!   CDN 断线自动重连（lavf reconnect）、15s 网络超时兜底——串流卡顿三件套。
 //! - `--hwdec=auto`（macOS VideoToolbox / Windows d3d11va / Linux vaapi）：
 //!   HEVC 1080x1920 软解曾 53 秒丢 139 帧（A-V 漂移 0.16s）= 用户看到的「闪跳」。
 //! - `--force-media-title` 显示《剧名》第N集（窗口标题 + OSC）。
@@ -15,7 +20,8 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 
 /// 一次要播的内容（单集）。
 #[derive(Clone, Debug)]
@@ -103,11 +109,52 @@ pub fn ipc_path() -> PathBuf {
     }
 }
 
+/// 会话级播放器选项（每次 launch 都带上；与具体剧集无关）。
+/// 独立成纯函数以便测试：缓冲/不闪退/IPC 三类缺一不可。
+/// - 缓冲：串流 CDN 抖动是卡顿主因——起播先缓冲 3s（cache-pause-initial），
+///   预读 60s/上限 128MiB；lavf reconnect 让 CDN 掐线时自动重连续播而不是卡死；
+///   network-timeout 15s 兜底「永远 stall」的死流。
+/// - keep-open：mpv 默认播完 eof 直接退出进程（窗口消失）。保持存活才能让
+///   「连播/下一集」走同窗口 loadfile replace——否则换集要重开进程，且 eof 事件
+///   与进程退出之间的竞态会让 loadfile 写进垂死进程（UI 显示在播、实际没播）。
+/// - input-ipc-server 由调用方按实例拼接，不在此列。
+pub fn session_option_args(kind: PlayerKind) -> Vec<String> {
+    vec![
+        format!("{}=auto", kind.opt("hwdec")),
+        format!("{}=yes", kind.opt("cache")),
+        format!("{}=3", kind.opt("cache-pause-wait")),
+        // cache-pause-initial 是布尔开关，`--x=yes` 与 `--x` 等价，统一带 =yes 便于断言
+        format!("{}=yes", kind.opt("cache-pause-initial")),
+        format!("{}=60", kind.opt("demuxer-readahead-secs")),
+        format!("{}=128MiB", kind.opt("demuxer-max-bytes")),
+        format!("{}=64MiB", kind.opt("demuxer-max-back-bytes")),
+        format!("{}=15", kind.opt("network-timeout")),
+        format!(
+            "{}=reconnect=1,reconnect_streamed=1,reconnect_delay_max=30",
+            kind.opt("stream-lavf-o")
+        ),
+        format!("{}=yes", kind.opt("keep-open")),
+    ]
+}
+
+/// 「播完后要不要自动接下一集」的唯一判定（GUI 与测试共用）。
+/// 返回 Some(下一集) 仅当：原因是自然播完 eof、开了连播、且还有下一集。
+/// stop/quit/redirect 是我们自己换集/退出引起的，绝不推进。
+pub fn autoplay_next_ep(reason: &str, autoplay: bool, ep: usize, total: usize) -> Option<usize> {
+    if reason != "eof" || !autoplay || ep >= total {
+        return None;
+    }
+    Some(ep + 1)
+}
+
 /// 一个存活的播放会话。
 pub struct PlayerSession {
     pub ipc: PathBuf,
     pub kind: PlayerKind,
     child: Child,
+    /// 会话级停机旗：quit/drop 置 false，事件读取线程见 false 即退出
+    /// （不再依赖 GUI 侧共享旗——旧线程曾因旗永不落零而空转泄漏）。
+    running: Arc<AtomicBool>,
 }
 
 impl PlayerSession {
@@ -127,11 +174,8 @@ impl PlayerSession {
         let mut cmd = Command::new(program);
         // mpv 部分选项（input-ipc-server 等）只认 = 形态，不吃空格分离，全部用 = 传递。
         // （IINA 透传见 render_args；此处 opt() 前缀 + = 合并，iina-cli 也接受 --mpv-x=v。）
-        cmd.arg(format!("{}=auto", kind.opt("hwdec")))
-            .arg(format!("{}={}", kind.opt("input-ipc-server"), ipc.display()))
-            // 预读 30s：直播源网络抖动时少卡顿跳帧
-            .arg(format!("{}=30", kind.opt("demuxer-readahead-secs")))
-            .arg(format!("{}=64MiB", kind.opt("demuxer-max-bytes")))
+        cmd.arg(format!("{}={}", kind.opt("input-ipc-server"), ipc.display()))
+            .args(render_args(kind, session_option_args(kind)))
             .args(render_args(kind, first.mpv_args()))
             .args(
                 std::env::var("GUO_MPV_ARGS")
@@ -144,11 +188,21 @@ impl PlayerSession {
             .stdin(Stdio::null())
             .stderr(Stdio::from(log));
         let child = cmd.spawn()?;
-        Ok(PlayerSession { ipc: ipc.to_path_buf(), kind, child })
+        Ok(PlayerSession {
+            ipc: ipc.to_path_buf(),
+            kind,
+            child,
+            running: Arc::new(AtomicBool::new(true)),
+        })
     }
 
     pub fn from_existing(ipc: PathBuf, kind: PlayerKind, child: Child) -> PlayerSession {
-        PlayerSession { ipc, kind, child }
+        PlayerSession { ipc, kind, child, running: Arc::new(AtomicBool::new(true)) }
+    }
+
+    /// 事件读取线程用的停机旗（每会话独立，quit 后 reader 自行退出）。
+    pub fn running_flag(&self) -> Arc<AtomicBool> {
+        self.running.clone()
     }
 
     pub fn child_id(&self) -> u32 {
@@ -218,6 +272,7 @@ impl PlayerSession {
 
     /// 礼貌退出（IPC quit；失败再由调用方 kill 进程）。
     pub fn quit(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
         if let Ok(mut conn) = open_ipc(&self.ipc) {
             let _ = send_cmd(&mut conn, "{\"command\": [\"quit\"]}\n");
             std::thread::sleep(std::time::Duration::from_millis(400));
@@ -367,6 +422,17 @@ pub fn handle_event_line(line: &str) -> Option<PlayerEvent> {
                 other => PlayerEvent::Failed(other.to_string()),
             })
         }
+        // keep-open 会话播完不产生 end-file（文件不卸载，暂停在尾帧），
+        // eof 信号 = eof-reached 属性翻 true（event_loop 连线时已订阅）。
+        "property-change" => {
+            let name = v.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            let hit = v.get("data").and_then(|d| d.as_bool()).unwrap_or(false);
+            if name == "eof-reached" && hit {
+                Some(PlayerEvent::Ended)
+            } else {
+                None
+            }
+        }
         "start-file" => Some(PlayerEvent::Started),
         "file-loaded" => Some(PlayerEvent::FileLoaded),
         _ => None,
@@ -394,10 +460,17 @@ pub fn event_loop(
 ) {
     use std::sync::atomic::Ordering;
     while running.load(Ordering::Relaxed) {
-        let Ok(conn) = open_ipc(ipc) else {
+        let Ok(mut conn) = open_ipc(ipc) else {
             std::thread::sleep(std::time::Duration::from_millis(500));
             continue;
         };
+        // 每次连接都要重发订阅：keep-open 会话的 eof 信号走 eof-reached 属性
+        // （end-file eof 在 keep-open 下不存在）。订阅失败不致命——非 keep-open
+        // 播放器仍会用 end-file eof 兜底。
+        let _ = send_cmd(
+            &mut conn,
+            "{\"command\": [\"observe_property\", 1, \"eof-reached\"]}\n",
+        );
         let mut reader = BufReader::new(conn);
         loop {
             if !running.load(Ordering::Relaxed) {
@@ -432,6 +505,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn session_args_cover_buffer_keepopen_ipc() {
+        for kind in [PlayerKind::Mpv, PlayerKind::Iina] {
+            let args = session_option_args(kind);
+            let has = |prefix: &str| args.iter().any(|a| a.starts_with(prefix));
+            // 缓冲三件套：起播缓冲 + 预读上限 + 断线重连/超时
+            assert!(has(&format!("{}=yes", kind.opt("cache"))), "{args:?}");
+            assert!(has(&format!("{}=yes", kind.opt("cache-pause-initial"))), "{args:?}");
+            assert!(has(&format!("{}=3", kind.opt("cache-pause-wait"))), "{args:?}");
+            assert!(has(&format!("{}=60", kind.opt("demuxer-readahead-secs"))), "{args:?}");
+            assert!(has(&format!("{}=128MiB", kind.opt("demuxer-max-bytes"))), "{args:?}");
+            assert!(has(&format!("{}=reconnect=1", kind.opt("stream-lavf-o"))), "{args:?}");
+            assert!(has(&format!("{}=15", kind.opt("network-timeout"))), "{args:?}");
+            // 连播正确性的根基：eof 不退出进程
+            assert!(has(&format!("{}=yes", kind.opt("keep-open"))), "{args:?}");
+            assert!(has(&format!("{}=auto", kind.opt("hwdec"))), "{args:?}");
+            // IPC/剧集参数不属于会话级选项
+            assert!(!has("input-ipc-server"), "{args:?}");
+        }
+        // IINA 透传形态：--mpv-<名> <值> 拆分由 render_args 负责，这里确认前缀已带
+        let iina = session_option_args(PlayerKind::Iina);
+        assert!(iina.iter().all(|a| a.starts_with("--mpv-")), "{iina:?}");
+    }
+
+    #[test]
+    fn autoplay_decision_matrix() {
+        // 自然播完 + 开连播 + 有下一集 → 接下一集
+        assert_eq!(autoplay_next_ep("eof", true, 3, 12), Some(4));
+        // 最后一级 → 不再推进
+        assert_eq!(autoplay_next_ep("eof", true, 12, 12), None);
+        // 没开连播 → 不推进
+        assert_eq!(autoplay_next_ep("eof", false, 3, 12), None);
+        // 自己换集/退出（stop|quit|redirect）绝不推进
+        for reason in ["stop", "quit", "redirect"] {
+            assert_eq!(autoplay_next_ep(reason, true, 3, 12), None, "{reason}");
+        }
+        // 播放失败 → 不推进
+        assert_eq!(autoplay_next_ep("error", true, 3, 12), None);
+    }
+
+    #[test]
     fn event_parsing() {
         assert_eq!(
             handle_event_line("{\"event\":\"end-file\",\"reason\":\"eof\"}"),
@@ -450,6 +563,26 @@ mod tests {
         assert_eq!(
             handle_event_line("{\"event\":\"file-loaded\"}"),
             Some(PlayerEvent::FileLoaded)
+        );
+        // keep-open 会话：eof-reached 属性翻 true = 播完（end-file 不存在）
+        assert_eq!(
+            handle_event_line(
+                "{\"event\":\"property-change\",\"id\":1,\"name\":\"eof-reached\",\"data\":true}"
+            ),
+            Some(PlayerEvent::Ended)
+        );
+        // 属性翻回 false（重新载入/回跳）与无关属性都必须被忽略
+        assert_eq!(
+            handle_event_line(
+                "{\"event\":\"property-change\",\"id\":1,\"name\":\"eof-reached\",\"data\":false}"
+            ),
+            None
+        );
+        assert_eq!(
+            handle_event_line(
+                "{\"event\":\"property-change\",\"id\":2,\"name\":\"pause\",\"data\":true}"
+            ),
+            None
         );
         // mpv 的事件流混着大量无关事件（seek、metadata-update…），都必须被忽略
         assert_eq!(handle_event_line("{\"event\":\"seek\"}"), None);

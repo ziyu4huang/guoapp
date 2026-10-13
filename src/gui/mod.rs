@@ -150,6 +150,9 @@ enum Msg {
         url: String,
         referer: String,
         key: Option<String>,
+        /// 请求代数：request_play 每次递增，回包时对不上号 = 过期请求
+        /// （连点/连播与手动点击并发时后完成的 resolve 不得抢播）。
+        seq: u64,
     },
     /// 播放器报告当前文件结束（reason: eof=自然播完 / stop|quit=我们自己换集退出 / 其余=异常）。
     PlayerEnded {
@@ -197,8 +200,8 @@ pub struct GuiApp {
     status: (String, std::time::Instant),
     /// 串流播放单实例会话（None=未启动/已退出）。
     player: Option<crate::player::PlayerSession>,
-    /// 事件线程开关（随会话生灭）。
-    player_running: Arc<std::sync::atomic::AtomicBool>,
+    /// 播放请求代数（防过期 resolve 回包串台）。
+    play_seq: u64,
     now_playing: Option<NowPlaying>,
     /// 播完自动接下一集。
     autoplay_next: bool,
@@ -242,7 +245,7 @@ impl GuiApp {
             downloads: Vec::new(),
             status: ("就绪".into(), std::time::Instant::now()),
             player: None,
-            player_running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            play_seq: 0,
             now_playing: None,
             autoplay_next: true,
         };
@@ -408,6 +411,8 @@ impl GuiApp {
         let client = self.client.clone();
         let store = self.store.clone();
         let tx = self.tx.clone();
+        self.play_seq += 1;
+        let seq = self.play_seq;
         self.set_status(format!("第{}集 取流中…", ep));
         thread::spawn(move || match media::try_resolve_media(&client, &store, &series_id, &chapter.video_id) {
             Ok(resolved) => {
@@ -419,6 +424,7 @@ impl GuiApp {
                     url: resolved.url,
                     referer: resolved.referer,
                     key: resolved.cenc_key.map(hex::encode),
+                    seq,
                 });
             }
             Err(err) => {
@@ -509,7 +515,12 @@ impl GuiApp {
                     self.record_library_episode(&drama_id, ep, &file, kind, quality, &dir);
                 }
             }
-            Msg::PlayReady { drama_id, drama_title, ep, total, url, referer, key } => {
+            Msg::PlayReady { drama_id, drama_title, ep, total, url, referer, key, seq } => {
+                // 过期回包丢弃：用户连点两集/连播与手动点击并发时，只有最后
+                // 一次请求的 resolve 结果允许上台（后完成抢播 = 播错集）。
+                if seq != self.play_seq {
+                    return;
+                }
                 let item = crate::player::PlayItem {
                     url,
                     referer,
@@ -538,9 +549,9 @@ impl GuiApp {
                     let log_path = self.store.dir.join("mpv-last.log");
                     match crate::player::PlayerSession::launch(kind, &program, &item, &ipc, &log_path) {
                         Ok(session) => {
-                            // 事件线程：end-file 驱动「连播/下一集」；随会话生灭。
-                            self.player_running.store(true, std::sync::atomic::Ordering::Relaxed);
-                            let running = self.player_running.clone();
+                            // 事件线程：end-file 驱动「连播/下一集」；停机旗随会话
+                            // 生灭（quit/drop 置 false，旧 reader 不会空转泄漏）。
+                            let running = session.running_flag();
                             let tx_events = self.tx.clone();
                             let ipc_for_reader = session.ipc.clone();
                             thread::spawn(move || {
@@ -585,17 +596,16 @@ impl GuiApp {
                 }
             }
             Msg::PlayerEnded { reason } => {
-                // stop/quit = 我们自己换集或退出引起的 end-file，不是播完。
-                if reason == "stop" || reason == "quit" || reason == "redirect" {
-                    return;
-                }
-                let can_next = self
+                // 判定收口在 player::autoplay_next_ep（纯函数 + 测试）：
+                // 只有 eof + 连播开 + 还有下一集才推进；stop/quit/redirect 是
+                // 我们自己 loadfile 换集/退出引起的，绝不推进。
+                let request = self
                     .now_playing
                     .as_ref()
-                    .map(|np| np.ep < np.total)
-                    .unwrap_or(false);
-                if reason == "eof" && self.autoplay_next && can_next {
-                    let next_ep = self.now_playing.as_ref().unwrap().ep + 1;
+                    .and_then(|np| {
+                        crate::player::autoplay_next_ep(&reason, self.autoplay_next, np.ep, np.total)
+                    });
+                if let Some(next_ep) = request {
                     self.set_status(format!("第{}集 播完，自动接第{}集…", next_ep - 1, next_ep));
                     self.request_play(next_ep);
                 } else if reason == "eof" {
@@ -605,7 +615,7 @@ impl GuiApp {
                         .map(|np| format!("第{}集 播完（共{}集）", np.ep, np.total))
                         .unwrap_or_else(|| "播放结束".into());
                     self.set_status(label);
-                } else {
+                } else if reason != "stop" && reason != "quit" && reason != "redirect" {
                     self.set_status(format!("播放中断：{}（可重试同一集；日志见数据目录 mpv-last.log）", reason));
                 }
             }
