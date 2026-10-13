@@ -227,7 +227,15 @@ fn ipc_session_live() {
     let ipc = player::ipc_path();
     let log = store.dir.join("mpv-test.log");
     eprintln!("step1: launch");
-    let mut session = player::PlayerSession::launch(kind, &program, &item(&m1, 1), &ipc, &log)
+    let mut session = player::PlayerSession::launch(
+        kind,
+        &program,
+        &item(&m1, 1),
+        &ipc,
+        &log,
+        false,
+        &Default::default(),
+    )
         .expect("launch mpv");
     eprintln!("step2: session up, wait file-loaded");
 
@@ -286,9 +294,11 @@ fn ipc_session_live() {
     eprintln!("✓ 会话退出干净");
 }
 
-/// eof 后进程必须存活（--keep-open=yes）且 IPC 仍可 loadfile 接集——
-/// 连播不断窗/不假播放的根基（旧版 mpv 默认 eof 退出，loadfile 打进垂死进程
-/// 会被接受但随即退出 = UI 显示在播实际黑屏）。本地 2s 样片，不依赖网络。
+/// eof 后进程/窗口必须存活（idle+force-window 连播形态）且 IPC 仍可 loadfile
+/// 接集——连播不断窗/不假播放的根基（旧版 mpv 默认 eof 退出进程，loadfile 打进
+/// 垂死进程会被接受但随即退出 = UI 显示在播实际黑屏）。播完信号=end-file eof
+/// （idle 会话照常发；keep-open 方案因 mpv 0.41 eof 通知断供已废弃，实录见
+/// session_option_args）。本地 2s 样片，不依赖网络。
 /// 运行：cargo test --test record_gif eof_keepopen -- --ignored --nocapture
 #[test]
 #[ignore]
@@ -325,15 +335,31 @@ fn eof_keepopen_session_alive_then_loadfile_next() {
     let (kind, program) = player::resolve_player();
     let ipc = player::ipc_path();
     let log = dir.join("mpv-eof.log");
-    eprintln!("step1: launch (keep-open 会话)");
-    let mut session =
-        player::PlayerSession::launch(kind, &program, &item(&ep1, "测试第1集"), &ipc, &log)
-            .expect("launch mpv");
+    // 恢复参数格式实测：负坐标位置（副屏在主屏左/上时 x/y 为负）+ 窗口缩放。
+    // mpv 对非法 option 值会立刻退出——本测试能开播即证明格式被接受。
+    let prefs = player::PlayerPrefs {
+        x: Some(-1920),
+        y: Some(-80),
+        window_scale: Some(1.0),
+        ..Default::default()
+    };
+    eprintln!("step1: launch (keep-open 会话 + 恢复参数 -1920,-80 @1.0)");
+    let mut session = player::PlayerSession::launch(
+        kind,
+        &program,
+        &item(&ep1, "测试第1集"),
+        &ipc,
+        &log,
+        true,
+        &prefs,
+    )
+    .expect("launch mpv");
 
     let running = session.running_flag();
     let (ev_tx, ev_rx) = std::sync::mpsc::channel();
     let ev_ipc = session.ipc.clone();
     std::thread::spawn(move || {
+        // 生产路径：event_loop（end-file eof 是 idle 会话的播完信号）
         player::event_loop(&ev_ipc, &running, move |ev| ev_tx.send(ev).is_ok())
     });
 
@@ -358,12 +384,32 @@ fn eof_keepopen_session_alive_then_loadfile_next() {
     // 发完（真实网络串流则不会）——所以「开播」无法用事件断言，改等自然播完
     // 的 eof，它同时证明「文件真的加载并播到了底」，是更强的证据。
     wait_ended("第一集播完", 30);
-    eprintln!("✓ 第一集自然播完（eof）");
+    eprintln!("✓ 第一集自然播完（end-file eof，idle 会话进程/窗口存活）");
 
     // 核心：eof 后——keep-open 让进程活着，IPC 仍可用
     assert!(session.process_alive(), "eof 后进程必须存活（--keep-open=yes 失效？）");
     assert!(session.ipc_ready(), "eof 后 IPC 必须仍可达");
     eprintln!("✓ eof 后进程存活 + IPC 可达（旧版此处 mpv 已退出 = 连播 bug 根源）");
+
+    // 设定捕获：eof 后 idle 会话文件已卸载——全局量（音量/静音/全屏/最大化）
+    // 仍应可读，文件级量（speed）拿不到=None（生产上 FileLoaded 时已捕过真值，
+    // 正合「部分失败不连坐」）；null vo 无窗口 → scale/位置也拿不到。
+    let caps = session.capture_prefs();
+    assert!((caps.volume.unwrap_or(-1.0) - 100.0).abs() < 0.5, "volume 应为默认 100: {:?}", caps);
+    assert!(!caps.mute, "mute 默认关: {:?}", caps);
+    assert!(
+        caps.speed.map(|s| (s - 1.0).abs() < 0.01).unwrap_or(true),
+        "speed 缺席=None 或 1.0: {:?}",
+        caps
+    );
+    assert!(!caps.fullscreen && !caps.maximized, "全屏/最大化默认关: {:?}", caps);
+    // scale 读回的是选项当前值：本测试种了 1.0 → Some(1.0)（真窗口下=实际缩放）
+    assert!(
+        caps.window_scale.map(|s| (s - 1.0).abs() < 0.01).unwrap_or(true),
+        "scale 应回读种子值 1.0（或缺席）: {:?}",
+        caps
+    );
+    eprintln!("✓ IPC 设定捕获链路通（{:?}）", caps);
 
     // eof 后接第二集：同窗口 loadfile replace（连播的真实路径）；
     // 第二集也必须播到底（Ended）= 真加载真播放，不是「接受了命令但没播」

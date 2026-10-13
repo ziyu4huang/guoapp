@@ -22,6 +22,9 @@ pub struct State {
     pub install_id: String,
     #[serde(default)]
     pub feeds: BTreeMap<String, FeedCursor>,
+    /// 播放器窗口位置/大小与播放设定记忆（跨启动恢复；player::PlayerPrefs）。
+    #[serde(default)]
+    pub player_prefs: crate::player::PlayerPrefs,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

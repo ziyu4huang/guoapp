@@ -1,6 +1,6 @@
 [package]
 name = "guo"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 description = "guoapp — 红果短剧工具（Rust 重写）：CLI + 原生 GUI（egui），目录 / 搜索 / 取流 / 下载"
 

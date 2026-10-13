@@ -7,7 +7,7 @@ use crate::model::{Chapter, Drama};
 use crate::state::{EpisodeEntry, LibraryEntry, Store};
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -158,6 +158,8 @@ enum Msg {
     PlayerEnded {
         reason: String,
     },
+    /// 后台捕获到的播放器窗口/设定快照（存 state.json，下次启动恢复）。
+    PlayerPrefs(crate::player::PlayerPrefs),
     Status(String),
 }
 
@@ -399,6 +401,19 @@ impl GuiApp {
         }
     }
 
+    /// 关窗时刻的同步捕快（UI 线程短暂阻塞一次 IPC 查询，毫秒级）：捕完落盘。
+    fn capture_player_prefs(&mut self) {
+        let Some(s) = self.player.as_mut() else { return };
+        if !s.process_alive() {
+            return;
+        }
+        let prefs = s.capture_prefs();
+        if prefs != crate::player::PlayerPrefs::default() {
+            self.store.state.player_prefs = prefs;
+            let _ = self.store.save();
+        }
+    }
+
     fn request_play(&mut self, ep: usize) {
         let Some(detail) = self.detail.as_ref() else { return };
         let Some(chapter) = detail.chapters.as_ref().and_then(|cs| cs.iter().find(|c| c.index == ep).cloned()) else {
@@ -547,28 +562,55 @@ impl GuiApp {
                     let (kind, program) = crate::player::resolve_player();
                     let ipc = crate::player::ipc_path();
                     let log_path = self.store.dir.join("mpv-last.log");
-                    match crate::player::PlayerSession::launch(kind, &program, &item, &ipc, &log_path) {
+                    match crate::player::PlayerSession::launch(
+                        kind,
+                        &program,
+                        &item,
+                        &ipc,
+                        &log_path,
+                        true,
+                        &self.store.state.player_prefs,
+                    ) {
                         Ok(session) => {
-                            // 事件线程：end-file 驱动「连播/下一集」；停机旗随会话
-                            // 生灭（quit/drop 置 false，旧 reader 不会空转泄漏）。
+                            // 事件线程：end-file eof 驱动「连播/下一集」（idle 会话
+                            // 下 eof 照常发事件）；开播/播完各捕一次窗口与设定快照；
+                            // 停机旗随会话生灭（quit/drop 置 false，旧 reader 自退）。
                             let running = session.running_flag();
                             let tx_events = self.tx.clone();
                             let ipc_for_reader = session.ipc.clone();
+                            let ipc_for_call = ipc_for_reader.clone();
+                            let pid = session.child_id();
                             thread::spawn(move || {
                                 // 给播放器一点启动时间（event_loop 自带断线重连）。
                                 thread::sleep(std::time::Duration::from_millis(600));
-                                crate::player::event_loop(&ipc_for_reader, &running, move |ev| {
+                                // snapshot 持有自己的 tx 克隆（避免借住 tx_events，
+                                // 挡住 event_loop 闭包的 move 捕获）。
+                                let tx_snap = tx_events.clone();
+                                let mut snapshot = move |ipc: &Path| {
+                                    let tx2 = tx_snap.clone();
+                                    let ipc2 = ipc.to_path_buf();
+                                    thread::spawn(move || {
+                                        let p =
+                                            crate::player::PlayerSession::capture_ipc_prefs(&ipc2, pid);
+                                        let _ = tx2.send(Msg::PlayerPrefs(p));
+                                    });
+                                };
+                                crate::player::event_loop(&ipc_for_call, &running, move |ev| {
                                     let msg = match ev {
                                         crate::player::PlayerEvent::Ended => {
+                                            snapshot(&ipc_for_reader);
                                             Some(Msg::PlayerEnded { reason: "eof".into() })
                                         }
                                         crate::player::PlayerEvent::Failed(reason) => {
                                             Some(Msg::PlayerEnded { reason })
                                         }
+                                        crate::player::PlayerEvent::FileLoaded => {
+                                            snapshot(&ipc_for_reader);
+                                            None
+                                        }
                                         // 换集/启动类事件：GUI 不需要（标题等已随命令下发）
                                         crate::player::PlayerEvent::Replaced => None,
                                         crate::player::PlayerEvent::Started => None,
-                                        crate::player::PlayerEvent::FileLoaded => None,
                                     };
                                     match msg {
                                         Some(m) => tx_events.send(m).is_ok(),
@@ -617,6 +659,13 @@ impl GuiApp {
                     self.set_status(label);
                 } else if reason != "stop" && reason != "quit" && reason != "redirect" {
                     self.set_status(format!("播放中断：{}（可重试同一集；日志见数据目录 mpv-last.log）", reason));
+                }
+            }
+            Msg::PlayerPrefs(prefs) => {
+                // 只在有实质内容时落盘（IPC 全挂=全 Default，别把上一份记忆洗掉）
+                if prefs != crate::player::PlayerPrefs::default() {
+                    self.store.state.player_prefs = prefs;
+                    let _ = self.store.save();
                 }
             }
             Msg::Status(text) => self.set_status(text),
@@ -839,6 +888,11 @@ impl eframe::App for GuiApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // 关窗前最后一刻捕一次播放器设定（窗口位置/大小/音量…），拖完窗直接
+        // 关掉也不会丢。捕完不拦 close（照常退出，Drop 会收掉播放器进程）。
+        if ctx.input(|i| i.viewport().close_requested()) {
+            self.capture_player_prefs();
+        }
         let mut got_msg = false;
         while let Ok(msg) = self.rx.try_recv() {
             self.apply_msg(ctx, msg);

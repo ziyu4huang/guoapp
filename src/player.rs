@@ -3,9 +3,10 @@
 //! 设计：
 //! - 会话只 spawn 一次；换集走 IPC `loadfile replace`，不再每集开新窗口
 //!   （旧行为每集一个进程 = 多窗口闪跳的来源之一）。
-//! - `--keep-open=yes`：播完 eof 不退出进程（mpv 默认会退出）。这样连播/下一集
-//!   永远打在活会话上（loadfile replace 无缝接集），消除「eof 后进程垂死、
-//!   loadfile 被接受但随即退出」的假播放竞态。
+//! - GUI 连播形态（keepalive）：`--idle=yes --force-window=yes`——播完 eof 文件
+//!   正常卸载（end-file eof = 最可靠的播完事件），但进程与窗口不退，下一集
+//!   打进同一窗口不闪窗。实录：keep-open 方案下 mpv 0.41 不发 end-file 且
+//!   eof-reached 通知断供（见 session_option_args），废弃。
 //! - 缓冲策略（session_option_args）：起播先缓冲 3s、预读 60s/上限 128MiB、
 //!   CDN 断线自动重连（lavf reconnect）、15s 网络超时兜底——串流卡顿三件套。
 //! - `--hwdec=auto`（macOS VideoToolbox / Windows d3d11va / Linux vaapi）：
@@ -22,6 +23,72 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+
+/// 播放器窗口与播放设定记忆（GUI/CLI 共用，存 state.json，跨启动恢复）。
+/// 只存「能精确取回」的量：大小用 window-scale（相对视频，跨显示器/HIDPI 自洽），
+/// 位置用 macOS 窗口列表坐标（其余平台暂无零依赖取法 → None=不恢复位置）。
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PlayerPrefs {
+    #[serde(default)]
+    pub x: Option<i32>,
+    #[serde(default)]
+    pub y: Option<i32>,
+    #[serde(default)]
+    pub window_scale: Option<f64>,
+    #[serde(default)]
+    pub maximized: bool,
+    #[serde(default)]
+    pub fullscreen: bool,
+    #[serde(default)]
+    pub volume: Option<f64>,
+    #[serde(default)]
+    pub mute: bool,
+    #[serde(default)]
+    pub speed: Option<f64>,
+}
+
+impl PlayerPrefs {
+    fn sane(&self) -> bool {
+        // 只做垃圾值过滤（第三方播放器/异常状态）；音量上限交给 mpv 的
+        // volume-max 自己夹（有的用户会调高 volume-max，我们不知道）。
+        self.window_scale.map(|s| (0.1..=20.0).contains(&s)).unwrap_or(true)
+            && self.speed.map(|s| (0.01..=100.0).contains(&s)).unwrap_or(true)
+            && self.volume.map(|v| (0.0..=1000.0).contains(&v)).unwrap_or(true)
+    }
+}
+
+/// 把记忆还原成启动参数（纯函数，可测）。只恢复非默认项：
+/// mute/maximized/fullscreen 默认就是 no/false，false 不下发，免得覆盖用户 env。
+pub fn restore_args(p: &PlayerPrefs) -> Vec<String> {
+    let mut out = Vec::new();
+    if !p.sane() {
+        return out;
+    }
+    if let (Some(x), Some(y)) = (p.x, p.y) {
+        out.push(format!("--geometry=+{x}+{y}"));
+    }
+    if let Some(s) = p.window_scale {
+        out.push(format!("--window-scale={s}"));
+    }
+    if p.maximized {
+        out.push("--window-maximized=yes".into());
+    }
+    if p.fullscreen {
+        out.push("--fullscreen=yes".into());
+    }
+    if let Some(v) = p.volume {
+        out.push(format!("--volume={v}"));
+    }
+    if p.mute {
+        out.push("--mute=yes".into());
+    }
+    if let Some(s) = p.speed {
+        out.push(format!("--speed={s}"));
+    }
+    out
+}
 
 /// 一次要播的内容（单集）。
 #[derive(Clone, Debug)]
@@ -114,12 +181,15 @@ pub fn ipc_path() -> PathBuf {
 /// - 缓冲：串流 CDN 抖动是卡顿主因——起播先缓冲 3s（cache-pause-initial），
 ///   预读 60s/上限 128MiB；lavf reconnect 让 CDN 掐线时自动重连续播而不是卡死；
 ///   network-timeout 15s 兜底「永远 stall」的死流。
-/// - keep-open：mpv 默认播完 eof 直接退出进程（窗口消失）。保持存活才能让
-///   「连播/下一集」走同窗口 loadfile replace——否则换集要重开进程，且 eof 事件
-///   与进程退出之间的竞态会让 loadfile 写进垂死进程（UI 显示在播、实际没播）。
+/// - keepalive（GUI 连播形态）：`--idle=yes --force-window=yes`——播完 eof 文件
+///   正常卸载（end-file eof 事件照常发=最可靠的播完信号），但进程与窗口不退，
+///   下一集 loadfile 打进同一窗口，不闪窗不重开。
+///   实录：v0.3.2 曾用 `--keep-open=yes`，但其下 end-file 不发、eof-reached
+///   属性通知在 mpv 0.41 断供（瞬态翻 true 即被重置，observe 六轮对照 0/6、
+///   轮询追不到）——连播判完靠不住，废弃。
 /// - input-ipc-server 由调用方按实例拼接，不在此列。
-pub fn session_option_args(kind: PlayerKind) -> Vec<String> {
-    vec![
+pub fn session_option_args(kind: PlayerKind, keepalive: bool) -> Vec<String> {
+    let mut args = vec![
         format!("{}=auto", kind.opt("hwdec")),
         format!("{}=yes", kind.opt("cache")),
         format!("{}=3", kind.opt("cache-pause-wait")),
@@ -133,8 +203,12 @@ pub fn session_option_args(kind: PlayerKind) -> Vec<String> {
             "{}=reconnect=1,reconnect_streamed=1,reconnect_delay_max=30",
             kind.opt("stream-lavf-o")
         ),
-        format!("{}=yes", kind.opt("keep-open")),
-    ]
+    ];
+    if keepalive {
+        args.push(format!("{}=yes", kind.opt("idle")));
+        args.push(format!("{}=yes", kind.opt("force-window")));
+    }
+    args
 }
 
 /// 「播完后要不要自动接下一集」的唯一判定（GUI 与测试共用）。
@@ -157,15 +231,160 @@ pub struct PlayerSession {
     running: Arc<AtomicBool>,
 }
 
+/// 按 pid 抓窗口 bounds（左上角原点全局坐标）——只有操作系统知道窗口在哪，
+/// mpv 本身不暴露位置属性。macOS 走 CoreGraphics 窗口列表（最小 FFI，零新依赖）；
+/// 其余平台暂无零依赖取法 → None = 不恢复位置（大小等其余设定照常记忆）。
+#[cfg(target_os = "macos")]
+pub fn window_bounds_for_pid(pid: u32) -> Option<(i32, i32, u32, u32)> {
+    macos_win::bounds_for_pid(pid)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn window_bounds_for_pid(_pid: u32) -> Option<(i32, i32, u32, u32)> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+mod macos_win {
+    //! CoreGraphics 窗口列表最小 FFI：kCGWindowListOptionOnScreenOnly |
+    //! ExcludeDesktopElements，按 owner pid 命中最大面积窗口取 kCGWindowBounds。
+    use std::collections::HashMap;
+    use std::os::raw::c_void;
+    use std::sync::OnceLock;
+
+    type CFRef = *const c_void;
+
+    /// CF 裸指针句柄包装：CoreFoundation 对象是线程安全的（文档明示 CF 层
+    /// thread-safe），裸指针类型本身不标 Send/Sync，这里替编译器作证。
+    #[derive(Clone, Copy)]
+    struct CfHandle(CFRef);
+    unsafe impl Send for CfHandle {}
+    unsafe impl Sync for CfHandle {}
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGWindowListCopyWindowInfo(option: u32, relative_to: CFRef) -> CFRef;
+        static kCGWindowOwnerPID: CFRef;
+        static kCGWindowBounds: CFRef;
+    }
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFArrayGetCount(arr: CFRef) -> isize;
+        fn CFArrayGetValueAtIndex(arr: CFRef, idx: isize) -> CFRef;
+        fn CFDictionaryGetValue(dict: CFRef, key: CFRef) -> CFRef;
+        fn CFNumberGetValue(num: CFRef, the_type: isize, value: *mut c_void) -> bool;
+        fn CFStringCreateWithCString(
+            alloc: CFRef,
+            c_str: *const std::os::raw::c_char,
+            encoding: u32,
+        ) -> CFRef;
+        fn CFRelease(cf: CFRef);
+    }
+
+    const LIST_OPTS: u32 = 1 | 2; // OnScreenOnly | ExcludeDesktopElements
+    const K_CF_NUMBER_SINT32: isize = 3;
+    const K_CF_NUMBER_FLOAT64: isize = 6;
+    const K_CF_STRING_UTF8: u32 = 0x0800_0100;
+    const K_CF_ALLOCATOR_NULL: CFRef = std::ptr::null();
+
+    fn cfstr(s: &'static str) -> CFRef {
+        let c = std::ffi::CString::new(s).expect("cfstr");
+        unsafe { CFStringCreateWithCString(K_CF_ALLOCATOR_NULL, c.as_ptr(), K_CF_STRING_UTF8) }
+    }
+
+    fn number_f64(v: CFRef) -> Option<f64> {
+        if v.is_null() {
+            return None;
+        }
+        let mut out: f64 = 0.0;
+        unsafe {
+            CFNumberGetValue(v, K_CF_NUMBER_FLOAT64, &mut out as *mut f64 as *mut c_void)
+                .then_some(out)
+        }
+    }
+
+    /// 缓存 bounds 子键与固定键（"X"/"Y"/"Width"/"Height"——CoreGraphics 文档
+    /// 的字面名；kCGWindowOwnerPID/kCGWindowBounds 是导出的常量）。
+    fn keys() -> &'static HashMap<&'static str, CfHandle> {
+        static KEYS: OnceLock<HashMap<&'static str, CfHandle>> = OnceLock::new();
+        KEYS.get_or_init(|| {
+            let mut m = HashMap::new();
+            for k in ["X", "Y", "Width", "Height"] {
+                m.insert(k, CfHandle(cfstr(k)));
+            }
+            unsafe {
+                m.insert("owner_pid", CfHandle(kCGWindowOwnerPID));
+                m.insert("bounds", CfHandle(kCGWindowBounds));
+            }
+            m
+        })
+    }
+
+    pub fn bounds_for_pid(pid: u32) -> Option<(i32, i32, u32, u32)> {
+        let keys = keys();
+        unsafe {
+            let list = CGWindowListCopyWindowInfo(LIST_OPTS, std::ptr::null());
+            if list.is_null() {
+                return None;
+            }
+            let n = CFArrayGetCount(list);
+            let mut best: Option<(f64, (i32, i32, u32, u32))> = None;
+            for i in 0..n {
+                let dict = CFArrayGetValueAtIndex(list, i);
+                if dict.is_null() {
+                    continue;
+                }
+                let mut owner: i32 = 0;
+                let owner_ref = CFDictionaryGetValue(dict, keys["owner_pid"].0);
+                if owner_ref.is_null()
+                    || !CFNumberGetValue(
+                        owner_ref,
+                        K_CF_NUMBER_SINT32,
+                        &mut owner as *mut i32 as *mut c_void,
+                    )
+                    || owner != pid as i32
+                {
+                    continue;
+                }
+                let bounds = CFDictionaryGetValue(dict, keys["bounds"].0);
+                if bounds.is_null() {
+                    continue;
+                }
+                let (Some(x), Some(y), Some(w), Some(h)) = (
+                    number_f64(CFDictionaryGetValue(bounds, keys["X"].0)),
+                    number_f64(CFDictionaryGetValue(bounds, keys["Y"].0)),
+                    number_f64(CFDictionaryGetValue(bounds, keys["Width"].0)),
+                    number_f64(CFDictionaryGetValue(bounds, keys["Height"].0)),
+                ) else {
+                    continue;
+                };
+                // 同 pid 可能多窗（不可见于本列表的除外）：取面积最大的主窗
+                let area = w * h;
+                if best.map(|(a, _)| area > a).unwrap_or(true) {
+                    best = Some((area, (x as i32, y as i32, w as u32, h as u32)));
+                }
+            }
+            CFRelease(list);
+            best.map(|(_, b)| b)
+        }
+    }
+}
+
 impl PlayerSession {
     /// 启动播放器并播放第一集。stderr 收进 `log_path`。
-    /// 追加参数:`GUO_MPV_ARGS`(空格分隔;测试用 --vo=null,用户可自定义)。
+    /// `keepalive`=GUI 连播形态（idle+force-window：eof 后进程/窗口存活，接集
+    /// 不闪窗）；CLI 一次性播放传 false（播完自然退出）。
+    /// `prefs`=上次会话记忆（窗口位置/大小/音量等），空 Default=不下发恢复参数。
+    /// 追加参数:`GUO_MPV_ARGS`(空格分隔;测试用 --vo=null,用户可自定义)——
+    /// 它排在恢复参数之后，用户的 env 永远赢过我们记忆的值。
     pub fn launch(
         kind: PlayerKind,
         program: &str,
         first: &PlayItem,
         ipc: &Path,
         log_path: &Path,
+        keepalive: bool,
+        prefs: &PlayerPrefs,
     ) -> std::io::Result<PlayerSession> {
         if let Some(parent) = log_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -175,7 +394,8 @@ impl PlayerSession {
         // mpv 部分选项（input-ipc-server 等）只认 = 形态，不吃空格分离，全部用 = 传递。
         // （IINA 透传见 render_args；此处 opt() 前缀 + = 合并，iina-cli 也接受 --mpv-x=v。）
         cmd.arg(format!("{}={}", kind.opt("input-ipc-server"), ipc.display()))
-            .args(render_args(kind, session_option_args(kind)))
+            .args(render_args(kind, session_option_args(kind, keepalive)))
+            .args(render_args(kind, restore_args(prefs)))
             .args(render_args(kind, first.mpv_args()))
             .args(
                 std::env::var("GUO_MPV_ARGS")
@@ -209,6 +429,48 @@ impl PlayerSession {
         self.child.id()
     }
 
+    /// 捕获当前窗口与播放设定（音量/静音/倍速/全屏/最大化/窗口缩放 + macOS
+    /// 位置）。逐项 IPC 查询，任何一项拿不到就保持 None/false——部分失败不
+    /// 连坐。GUI 在每集开播/播完与窗口关闭时调用，存回 state.json。
+    pub fn capture_prefs(&self) -> PlayerPrefs {
+        Self::capture_ipc_prefs(&self.ipc, self.child.id())
+    }
+
+    /// 同上，但 ipc/pid 由调用方给（事件读取线程只有这两个，不持有会话）。
+    pub fn capture_ipc_prefs(ipc: &Path, pid: u32) -> PlayerPrefs {
+        let get = |conn: &mut IpcConn, name: &str| -> Option<serde_json::Value> {
+            let reply = send_cmd_with_reply(
+                conn,
+                &format!("{{\"command\": [\"get_property\", \"{name}\"]}}\n"),
+            )
+            .ok()?;
+            let v: serde_json::Value = serde_json::from_str(reply.trim()).ok()?;
+            // 出错回包没有 data 字段 → None（property unavailable 等不连坐）
+            v.get("data").filter(|d| !d.is_null()).cloned()
+        };
+        let mut p = PlayerPrefs::default();
+        if let Ok(mut conn) = open_ipc(ipc) {
+            p.volume = get(&mut conn, "volume").and_then(|v| v.as_f64());
+            p.mute = get(&mut conn, "mute").and_then(|v| v.as_bool()).unwrap_or(false);
+            p.speed = get(&mut conn, "speed").and_then(|v| v.as_f64());
+            p.fullscreen = get(&mut conn, "fullscreen").and_then(|v| v.as_bool()).unwrap_or(false);
+            p.maximized = get(&mut conn, "window-maximized")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            p.window_scale = get(&mut conn, "current-window-scale").and_then(|v| v.as_f64());
+        }
+        if let Some((x, y, _, _)) = window_bounds_for_pid(pid) {
+            p.x = Some(x);
+            p.y = Some(y);
+        }
+        if !p.sane() {
+            // 数值越界（第三方播放器/异常状态）→ 宁可不恢复，只保留拿得到的窗口位置
+            let pos = (p.x, p.y);
+            p = PlayerPrefs { x: pos.0, y: pos.1, ..Default::default() };
+        }
+        p
+    }
+
     /// 进程是否还活着（探测，不收割 zombies 之外的语义）。
     pub fn process_alive(&mut self) -> bool {
         matches!(self.child.try_wait(), Ok(None))
@@ -220,7 +482,24 @@ impl PlayerSession {
     }
 
     /// 换集（replace 当前播放），并同步更新标题。
+    /// mpv 在起播/缓冲忙碌期对 IPC 命令的回执可能 >5s（实测偶发）——超时类
+    /// 错误自动重试（每次全新连接），被拒绝类错误当场返回不重试。
     pub fn load(&self, item: &PlayItem) -> std::io::Result<()> {
+        let mut last_err: Option<std::io::Error> = None;
+        for _ in 0..3 {
+            match self.load_once(item) {
+                Ok(()) => return Ok(()),
+                Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                    last_err = Some(e);
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last_err.unwrap_or_else(|| std::io::Error::other("load 重试耗尽")))
+    }
+
+    fn load_once(&self, item: &PlayItem) -> std::io::Result<()> {
         let mut conn = open_ipc(&self.ipc)?;
         // 标题先 set 再 loadfile：命令在 mpv 侧按序执行。
         let title_reply = send_cmd_with_reply(&mut conn, &format!(
@@ -415,23 +694,12 @@ pub fn handle_event_line(line: &str) -> Option<PlayerEvent> {
         "end-file" => {
             let reason = v.get("reason").and_then(|r| r.as_str()).unwrap_or("unknown");
             Some(match reason {
-                // eof = 自然播完；stop/quit/redirect = 我们 loadfile 换集或退出引起的，
-                // 不是播完，调用方要能区分。
+                // eof = 自然播完（idle 会话下照常发）；stop/quit/redirect =
+                // 我们 loadfile 换集或退出引起的，不是播完，调用方要能区分。
                 "eof" => PlayerEvent::Ended,
                 "stop" | "quit" | "redirect" => PlayerEvent::Replaced,
                 other => PlayerEvent::Failed(other.to_string()),
             })
-        }
-        // keep-open 会话播完不产生 end-file（文件不卸载，暂停在尾帧），
-        // eof 信号 = eof-reached 属性翻 true（event_loop 连线时已订阅）。
-        "property-change" => {
-            let name = v.get("name").and_then(|n| n.as_str()).unwrap_or("");
-            let hit = v.get("data").and_then(|d| d.as_bool()).unwrap_or(false);
-            if name == "eof-reached" && hit {
-                Some(PlayerEvent::Ended)
-            } else {
-                None
-            }
         }
         "start-file" => Some(PlayerEvent::Started),
         "file-loaded" => Some(PlayerEvent::FileLoaded),
@@ -452,25 +720,24 @@ pub enum PlayerEvent {
 }
 
 /// 事件循环（供专用线程调用）：持久连接逐行读事件，回调给调用方；
-/// 断线自动重连（mpv 端到端生命周期内不丢事件）。`running` 清零或回调返回 false 时结束。
+/// 断线自动重连。`running` 清零或回调返回 false 时结束。
+/// `GUO_MPV_EVENT_DEBUG=1` 时把每行原始事件打到 stderr（诊断事件链路用）。
+/// 播完信号=end-file eof（idle 会话下照常发，见 session_option_args 注释）。
 pub fn event_loop(
     ipc: &Path,
     running: &std::sync::atomic::AtomicBool,
     mut on_event: impl FnMut(PlayerEvent) -> bool,
 ) {
     use std::sync::atomic::Ordering;
+    let debug = std::env::var("GUO_MPV_EVENT_DEBUG").map(|v| v == "1").unwrap_or(false);
     while running.load(Ordering::Relaxed) {
         let Ok(mut conn) = open_ipc(ipc) else {
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            std::thread::sleep(std::time::Duration::from_millis(300));
             continue;
         };
-        // 每次连接都要重发订阅：keep-open 会话的 eof 信号走 eof-reached 属性
-        // （end-file eof 在 keep-open 下不存在）。订阅失败不致命——非 keep-open
-        // 播放器仍会用 end-file eof 兜底。
-        let _ = send_cmd(
-            &mut conn,
-            "{\"command\": [\"observe_property\", 1, \"eof-reached\"]}\n",
-        );
+        if debug {
+            eprintln!("[ev-loop] connected");
+        }
         let mut reader = BufReader::new(conn);
         loop {
             if !running.load(Ordering::Relaxed) {
@@ -480,6 +747,9 @@ pub fn event_loop(
             match reader.read_line(&mut line) {
                 Ok(0) | Err(_) => break, // 连接断开 → 重连
                 Ok(_) => {
+                    if debug {
+                        eprintln!("[ev-loop] {}", line.trim_end());
+                    }
                     if let Some(event) = handle_event_line(&line) {
                         if !on_event(event) {
                             return;
@@ -488,7 +758,10 @@ pub fn event_loop(
                 }
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        if debug {
+            eprintln!("[ev-loop] conn lost → 重连");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
     }
 }
 
@@ -507,7 +780,7 @@ mod tests {
     #[test]
     fn session_args_cover_buffer_keepopen_ipc() {
         for kind in [PlayerKind::Mpv, PlayerKind::Iina] {
-            let args = session_option_args(kind);
+            let args = session_option_args(kind, true);
             let has = |prefix: &str| args.iter().any(|a| a.starts_with(prefix));
             // 缓冲三件套：起播缓冲 + 预读上限 + 断线重连/超时
             assert!(has(&format!("{}=yes", kind.opt("cache"))), "{args:?}");
@@ -517,14 +790,19 @@ mod tests {
             assert!(has(&format!("{}=128MiB", kind.opt("demuxer-max-bytes"))), "{args:?}");
             assert!(has(&format!("{}=reconnect=1", kind.opt("stream-lavf-o"))), "{args:?}");
             assert!(has(&format!("{}=15", kind.opt("network-timeout"))), "{args:?}");
-            // 连播正确性的根基：eof 不退出进程
-            assert!(has(&format!("{}=yes", kind.opt("keep-open"))), "{args:?}");
+            // 连播形态：eof 后进程/窗口存活，end-file eof 事件照常发
+            assert!(has(&format!("{}=yes", kind.opt("idle"))), "{args:?}");
+            assert!(has(&format!("{}=yes", kind.opt("force-window"))), "{args:?}");
+            assert!(!has("keep-open"), "keep-open 方案已废弃（end-file 不发）: {args:?}");
             assert!(has(&format!("{}=auto", kind.opt("hwdec"))), "{args:?}");
             // IPC/剧集参数不属于会话级选项
             assert!(!has("input-ipc-server"), "{args:?}");
+            // CLI 一次性形态：不带 idle/force-window（播完自然退出）
+            let cli = session_option_args(kind, false);
+            assert!(!cli.iter().any(|a| a.contains("idle") || a.contains("force-window")), "{cli:?}");
         }
         // IINA 透传形态：--mpv-<名> <值> 拆分由 render_args 负责，这里确认前缀已带
-        let iina = session_option_args(PlayerKind::Iina);
+        let iina = session_option_args(PlayerKind::Iina, true);
         assert!(iina.iter().all(|a| a.starts_with("--mpv-")), "{iina:?}");
     }
 
@@ -542,6 +820,48 @@ mod tests {
         }
         // 播放失败 → 不推进
         assert_eq!(autoplay_next_ep("error", true, 3, 12), None);
+    }
+
+    #[test]
+    fn restore_args_full_empty_and_insane() {
+        // 空 = 不下发任何恢复参数（首启无记忆）
+        assert!(restore_args(&PlayerPrefs::default()).is_empty());
+        // 全量记忆 → 各参数逐一在场；mute/maximized/fullscreen=false 不下发
+        let p = PlayerPrefs {
+            x: Some(-1920),
+            y: Some(-80),
+            window_scale: Some(1.5),
+            maximized: true,
+            fullscreen: false,
+            volume: Some(42.0),
+            mute: false,
+            speed: Some(1.25),
+        };
+        let args = restore_args(&p);
+        assert!(args.contains(&"--geometry=+-1920+-80".to_string()), "{args:?}");
+        assert!(args.contains(&"--window-scale=1.5".to_string()), "{args:?}");
+        assert!(args.contains(&"--window-maximized=yes".to_string()), "{args:?}");
+        assert!(!args.iter().any(|a| a.contains("fullscreen")), "{args:?}");
+        assert!(args.contains(&"--volume=42".to_string()), "{args:?}");
+        assert!(!args.iter().any(|a| a.starts_with("--mute")), "{args:?}");
+        assert!(args.contains(&"--speed=1.25".to_string()), "{args:?}");
+        // 静音/全屏为 true 时才下发
+        let args = restore_args(&PlayerPrefs { mute: true, fullscreen: true, ..Default::default() });
+        assert!(args.contains(&"--mute=yes".to_string()) && args.contains(&"--fullscreen=yes".to_string()));
+        // 越界值（第三方播放器/异常）→ 整包拒绝，宁可不恢复
+        let insane = PlayerPrefs { window_scale: Some(9999.0), volume: Some(100.0), ..Default::default() };
+        assert!(restore_args(&insane).is_empty());
+        let insane = PlayerPrefs { volume: Some(9999.0), ..Default::default() };
+        assert!(restore_args(&insane).is_empty());
+        // 调高过 volume-max 的合法音量直通（mpv 自己按 volume-max 夹）
+        let loud = PlayerPrefs { volume: Some(140.0), ..Default::default() };
+        assert_eq!(restore_args(&loud), vec!["--volume=140".to_string()]);
+    }
+
+    #[test]
+    fn window_bounds_probe_returns_gracefully() {
+        // pid 0（内核）无窗口 → None 而非崩溃/挂起（macOS FFI 链路烟测）
+        assert_eq!(window_bounds_for_pid(0), None);
     }
 
     #[test]
@@ -564,27 +884,13 @@ mod tests {
             handle_event_line("{\"event\":\"file-loaded\"}"),
             Some(PlayerEvent::FileLoaded)
         );
-        // keep-open 会话：eof-reached 属性翻 true = 播完（end-file 不存在）
+        // mpv 的事件流混着大量无关事件（seek、metadata-update、属性变更…），都必须被忽略
         assert_eq!(
             handle_event_line(
                 "{\"event\":\"property-change\",\"id\":1,\"name\":\"eof-reached\",\"data\":true}"
             ),
-            Some(PlayerEvent::Ended)
-        );
-        // 属性翻回 false（重新载入/回跳）与无关属性都必须被忽略
-        assert_eq!(
-            handle_event_line(
-                "{\"event\":\"property-change\",\"id\":1,\"name\":\"eof-reached\",\"data\":false}"
-            ),
             None
         );
-        assert_eq!(
-            handle_event_line(
-                "{\"event\":\"property-change\",\"id\":2,\"name\":\"pause\",\"data\":true}"
-            ),
-            None
-        );
-        // mpv 的事件流混着大量无关事件（seek、metadata-update…），都必须被忽略
         assert_eq!(handle_event_line("{\"event\":\"seek\"}"), None);
         assert_eq!(handle_event_line("not json"), None);
     }

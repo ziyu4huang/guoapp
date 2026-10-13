@@ -436,7 +436,15 @@ fn play(client: &HgClient, store: &Store, rest: &[String]) -> i32 {
             };
             let ipc = guo::player::ipc_path();
             let log_path = store.dir.join("mpv-last.log");
-            match guo::player::PlayerSession::launch(kind, player.as_str(), &item, &ipc, &log_path) {
+            match guo::player::PlayerSession::launch(
+                kind,
+                player.as_str(),
+                &item,
+                &ipc,
+                &log_path,
+                false, // CLI 一次性播放：播完自然退出（keepalive 是 GUI 连播形态专属）
+                &store.state.player_prefs,
+            ) {
                 Ok(mut session) => match session.child_wait() {
                     Ok(status) if status.success() => 0,
                     Ok(status) => fail(&format!("播放器退出码 {:?}", status.code())),
