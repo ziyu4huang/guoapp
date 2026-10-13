@@ -135,6 +135,13 @@ fn catalog(client: &HgClient, store: &mut Store, rest: &[String]) -> i32 {
         },
         None => GENRES.iter().collect(),
     };
+    let sort = flags
+        .get("sort")
+        .map(String::as_str)
+        .unwrap_or(guo::hgapp::SORT_LATEST);
+    if !guo::hgapp::valid_sort(sort) {
+        return fail("排序无效，可选 online_time（最新）/ hot_score（最热）/ play_cnt（最多观看）");
+    }
     let mut all: Vec<Drama> = Vec::new();
     let mut failures: Vec<String> = Vec::new();
     for g in genres {
@@ -146,7 +153,7 @@ fn catalog(client: &HgClient, store: &mut Store, rest: &[String]) -> i32 {
             if cursor.exhausted {
                 break;
             }
-            match client.catalog_page(store, g, &cursor) {
+            match client.catalog_page(store, g, &cursor, sort) {
                 Ok((items, next)) => {
                     let added = items.len();
                     let (next_offset, next_exhausted) = (next.offset, next.exhausted);

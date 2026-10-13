@@ -25,6 +25,9 @@ pub struct State {
     /// 播放器窗口位置/大小与播放设定记忆（跨启动恢复；player::PlayerPrefs）。
     #[serde(default)]
     pub player_prefs: crate::player::PlayerPrefs,
+    /// 目录排序偏好（hgapp::SORT_*，跨启动记忆）。
+    #[serde(default)]
+    pub catalog_sort: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -152,32 +152,17 @@ impl HgClient {
     }
 
     /// One catalog page for a genre feed. Returns dramas and the next cursor.
+    /// `sort`=服务端排序键（SORT_* 常量；无效值会被上游静默回退，勿乱传）。
+    /// 实测（2026-10-13）：online_time=最新上线（新剧 play_cnt 是 ~1000 占位值）、
+    /// play_cnt=按真实观看数递减、hot_score=平台热度榜。
     pub fn catalog_page(
         &self,
         store: &Store,
         genre: &Genre,
         cursor: &FeedCursor,
+        sort: &str,
     ) -> Result<(Vec<Drama>, FeedCursor), String> {
-        let mut payload = json!({
-            "req_scene": genre.scene,
-            "offset": cursor.offset,
-            "limit": 18,
-            "req_type": "only_content",
-            "need_selector_panel": false,
-            "client_req_type": if cursor.offset > 0 { 2 } else { 3 },
-            "session_id": cursor.session_id,
-            "filter_ids": "",
-            "select_items": {
-                "genre": [genre.key],
-                "sort": ["online_time"],
-                "gender": [],
-                "category_dim_theme": [],
-                "category_dim_role": [],
-                "category_dim_epoch": [],
-                "online_time": [],
-                "creation_status": []
-            }
-        });
+        let mut payload = catalog_payload(genre, cursor, sort);
         let attempt_cursor = cursor.clone();
         let mut last_err = String::new();
         for attempt in 0..2 {
@@ -267,6 +252,40 @@ fn truncate(s: &str, max: usize) -> String {
     } else {
         s.chars().take(max).collect()
     }
+}
+
+/// 目錄服務端排序鍵（select_items.sort）。無效值上游會静默回退成默認序，
+/// 所以只允许这几个：GUI/CLI 入口各自校验。
+pub const SORT_LATEST: &str = "online_time";
+pub const SORT_HOT: &str = "hot_score";
+pub const SORT_MOST_VIEWED: &str = "play_cnt";
+
+pub fn valid_sort(sort: &str) -> bool {
+    matches!(sort, SORT_LATEST | SORT_HOT | SORT_MOST_VIEWED)
+}
+
+/// 目錄請求體（純函式，测试断言 sort 落位）。
+pub fn catalog_payload(genre: &Genre, cursor: &FeedCursor, sort: &str) -> serde_json::Value {
+    json!({
+        "req_scene": genre.scene,
+        "offset": cursor.offset,
+        "limit": 18,
+        "req_type": "only_content",
+        "need_selector_panel": false,
+        "client_req_type": if cursor.offset > 0 { 2 } else { 3 },
+        "session_id": cursor.session_id,
+        "filter_ids": "",
+        "select_items": {
+            "genre": [genre.key],
+            "sort": [sort],
+            "gender": [],
+            "category_dim_theme": [],
+            "category_dim_role": [],
+            "category_dim_epoch": [],
+            "online_time": [],
+            "creation_status": []
+        }
+    })
 }
 
 pub fn parse_catalog_page(
@@ -757,4 +776,26 @@ pub fn search_combined(
             .then_with(|| a.title.cmp(&b.title))
     });
     Ok((dramas, warning))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_payload_carries_sort() {
+        let g = &GENRES[0];
+        let p = catalog_payload(g, &FeedCursor::default(), SORT_MOST_VIEWED);
+        assert_eq!(
+            p.pointer("/select_items/sort/0").and_then(|v| v.as_str()),
+            Some(SORT_MOST_VIEWED)
+        );
+        let p = catalog_payload(g, &FeedCursor::default(), SORT_HOT);
+        assert_eq!(
+            p.pointer("/select_items/sort/0").and_then(|v| v.as_str()),
+            Some(SORT_HOT)
+        );
+        assert!(valid_sort(SORT_LATEST) && valid_sort(SORT_HOT) && valid_sort(SORT_MOST_VIEWED));
+        assert!(!valid_sort("read_cnt") && !valid_sort("popular"));
+    }
 }

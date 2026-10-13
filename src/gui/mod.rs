@@ -107,6 +107,7 @@ enum DlStatus {
 enum Msg {
     CatalogPage {
         genre: String,
+        sort: CatalogSort,
         dramas: Vec<Drama>,
         /// 分页游标：必须存回 store，否则「更多×」永远重抓第一页。
         cursor: crate::state::FeedCursor,
@@ -114,6 +115,7 @@ enum Msg {
     /// 目录页加载失败：只解除 busy 标记（可重试），不标已到底。
     CatalogFailed {
         genre: String,
+        sort: CatalogSort,
         err: String,
     },
     SearchDone {
@@ -184,6 +186,42 @@ struct DownloadJob {
     quality: i64,
 }
 
+/// 目录服务端排序（select_items.sort）。键=API 值，label=界面文案。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CatalogSort {
+    Latest,
+    Hot,
+    MostViewed,
+}
+
+impl CatalogSort {
+    fn key(self) -> &'static str {
+        match self {
+            CatalogSort::Latest => crate::hgapp::SORT_LATEST,
+            CatalogSort::Hot => crate::hgapp::SORT_HOT,
+            CatalogSort::MostViewed => crate::hgapp::SORT_MOST_VIEWED,
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            CatalogSort::Latest => "最新上线",
+            CatalogSort::Hot => "最热门",
+            CatalogSort::MostViewed => "最多观看",
+        }
+    }
+    fn all() -> [CatalogSort; 3] {
+        [CatalogSort::Latest, CatalogSort::Hot, CatalogSort::MostViewed]
+    }
+    fn from_key(key: &str) -> Option<CatalogSort> {
+        CatalogSort::all().into_iter().find(|s| s.key() == key)
+    }
+}
+
+/// 目录缓存/游标复合键：排序切换后各自独立缓存与分页。
+fn cat_key(genre_key: &str, sort: CatalogSort) -> String {
+    format!("{genre_key}@{}", sort.key())
+}
+
 /// 正在串流播放的剧集（详情面板标记 + 下一集边界）。
 #[derive(Clone)]
 struct NowPlaying {
@@ -203,6 +241,8 @@ pub struct GuiApp {
     catalog: HashMap<String, Vec<Drama>>,
     catalog_exhausted: HashSet<String>,
     catalog_loading: HashSet<String>,
+    /// 目录排序（存 state.json，跨启动记忆）。
+    catalog_sort: CatalogSort,
     search_input: String,
     search_submitted: String,
     search_results: Vec<Drama>,
@@ -244,6 +284,8 @@ impl GuiApp {
             });
         }
         let cover_cache = CoverCache::new(tx.clone());
+        let catalog_sort =
+            CatalogSort::from_key(&store.state.catalog_sort).unwrap_or(CatalogSort::Latest);
         let mut app = GuiApp {
             store,
             client,
@@ -268,6 +310,7 @@ impl GuiApp {
             append_in_flight: None,
             now_playing: None,
             autoplay_next: true,
+            catalog_sort,
         };
         for genre in GENRES.iter() {
             app.request_catalog_page(genre.key);
@@ -280,23 +323,26 @@ impl GuiApp {
     }
 
     fn request_catalog_page(&mut self, genre_key: &str) {
-        if self.catalog_loading.contains(genre_key) || self.catalog_exhausted.contains(genre_key) {
+        let key = cat_key(genre_key, self.catalog_sort);
+        if self.catalog_loading.contains(&key) || self.catalog_exhausted.contains(&key) {
             return;
         }
-        self.catalog_loading.insert(genre_key.to_string());
+        self.catalog_loading.insert(key);
         let client = self.client.clone();
         let store = self.store.clone();
         let tx = self.tx.clone();
         let genre_key = genre_key.to_string();
+        let sort = self.catalog_sort;
         let genre: Option<&'static crate::hgapp::Genre> =
             GENRES.iter().find(|g| g.key == genre_key);
         thread::spawn(move || {
             let Some(genre) = genre else { return };
-            let cursor = store.feed(genre.key);
-            match client.catalog_page(&store, &genre, &cursor) {
+            let cursor = store.feed(&cat_key(genre.key, sort));
+            match client.catalog_page(&store, &genre, &cursor, sort.key()) {
                 Ok((items, next)) => {
                     let _ = tx.send(Msg::CatalogPage {
                         genre: genre.key.to_string(),
+                        sort,
                         dramas: items,
                         cursor: next,
                     });
@@ -305,11 +351,27 @@ impl GuiApp {
                     let _ = tx.send(Msg::Status(format!("{} 目录失败：{}", genre.name, err)));
                     let _ = tx.send(Msg::CatalogFailed {
                         genre: genre.key.to_string(),
+                        sort,
                         err,
                     });
                 }
             }
         });
+    }
+
+    /// 切换目录排序：记忆偏好，清空当前展示（各排序键独立缓存），重拉第一页。
+    fn set_catalog_sort(&mut self, sort: CatalogSort) {
+        if sort == self.catalog_sort {
+            return;
+        }
+        self.catalog_sort = sort;
+        self.store.state.catalog_sort = sort.key().to_string();
+        let _ = self.store.save();
+        self.catalog_loading.clear();
+        self.catalog_exhausted.clear();
+        for genre in GENRES.iter() {
+            self.request_catalog_page(genre.key);
+        }
     }
 
     fn request_search(&mut self) {
@@ -516,18 +578,29 @@ impl GuiApp {
 
     fn apply_msg(&mut self, ctx: &egui::Context, msg: Msg) {
         match msg {
-            Msg::CatalogPage { genre, dramas, cursor } => {
-                let slot = self.catalog.entry(genre.clone()).or_default();
+            Msg::CatalogPage { genre, sort, dramas, cursor } => {
+                let key = cat_key(&genre, sort);
+                let slot = self.catalog.entry(key.clone()).or_default();
                 crate::hgweb::merge_dramas(slot, dramas);
-                self.catalog_loading.remove(&genre);
-                self.store.set_feed(&genre, cursor);
+                // 服务端排序是「基准+掺推荐」，同一排序两次请求顺序会漂
+                // （实测 2026-10-13）——载入集内按观看数做客户端稳定排序，
+                // 顯示順序才確定。最新上线保持 API 原序。
+                match sort {
+                    CatalogSort::MostViewed | CatalogSort::Hot => slot.sort_by(|a, b| {
+                        crate::model::count_value(&b.views)
+                            .total_cmp(&crate::model::count_value(&a.views))
+                    }),
+                    CatalogSort::Latest => {}
+                }
+                self.catalog_loading.remove(&key);
+                self.store.set_feed(&key, cursor);
                 let _ = self.store.save();
-                if self.store.feed(&genre).exhausted {
-                    self.catalog_exhausted.insert(genre);
+                if self.store.feed(&key).exhausted {
+                    self.catalog_exhausted.insert(key);
                 }
             }
-            Msg::CatalogFailed { genre, err } => {
-                self.catalog_loading.remove(&genre);
+            Msg::CatalogFailed { genre, sort, err } => {
+                self.catalog_loading.remove(&cat_key(&genre, sort));
                 self.set_status(format!("{} 目录失败（可点「更多」重试）：{}", genre, err));
             }
             Msg::SearchDone { query, dramas, warning } => {
@@ -1123,17 +1196,33 @@ impl eframe::App for GuiApp {
 impl GuiApp {
     fn show_catalog(&mut self, ctx: &egui::Context) {
         // 字段级拆借:cover_cache 可变、catalog 只读——同一闭包内共存,免整帧 clone
-        let Self { cover_cache, catalog, catalog_loading, catalog_exhausted, .. } = self;
+        let Self {
+            cover_cache,
+            catalog,
+            catalog_loading,
+            catalog_exhausted,
+            catalog_sort,
+            ..
+        } = self;
+        let sort = *catalog_sort;
         let mut open: Option<Drama> = None;
         let mut more: Option<String> = None;
         let mut refresh = false;
+        let mut switch_sort: Option<CatalogSort> = None;
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
+                ui.label("排序：");
+                for s in CatalogSort::all() {
+                    if ui.selectable_label(sort == s, s.label()).clicked() && sort != s {
+                        switch_sort = Some(s);
+                    }
+                }
+                ui.separator();
                 ui.label("分类：");
                 for genre in GENRES.iter() {
-                    let count = catalog.get(genre.key).map(|v| v.len()).unwrap_or(0);
+                    let count = catalog.get(&cat_key(genre.key, sort)).map(|v| v.len()).unwrap_or(0);
                     let label = format!("{} ({})", genre.name, count);
-                    let busy = catalog_loading.contains(genre.key);
+                    let busy = catalog_loading.contains(&cat_key(genre.key, sort));
                     if ui.selectable_label(!busy, label).clicked() && count == 0 && !busy {
                         more = Some(genre.key.to_string());
                     }
@@ -1145,7 +1234,7 @@ impl GuiApp {
             ui.separator();
             egui::ScrollArea::vertical().id_salt("catalog_scroll").show(ui, |ui| {
                 for genre in GENRES.iter() {
-                    let Some(dramas) = catalog.get(genre.key) else { continue };
+                    let Some(dramas) = catalog.get(&cat_key(genre.key, sort)) else { continue };
                     if dramas.is_empty() {
                         continue;
                     }
@@ -1156,7 +1245,11 @@ impl GuiApp {
                         open = Some(d);
                     }
                 }
-                if catalog.values().all(|v| v.is_empty()) {
+                if catalog
+                    .iter()
+                    .filter(|(k, _)| k.ends_with(&format!("@{}", sort.key())))
+                    .all(|(_, v)| v.is_empty())
+                {
                     ui.add_space(30.0);
                     ui.vertical_centered(|ui| {
                         if catalog_loading.is_empty() {
@@ -1170,10 +1263,11 @@ impl GuiApp {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     for genre in GENRES.iter() {
-                        let busy = catalog_loading.contains(genre.key);
+                        let gkey = cat_key(genre.key, sort);
+                        let busy = catalog_loading.contains(&gkey);
                         let label = if busy {
                             format!("{} …", genre.name)
-                        } else if catalog_exhausted.contains(genre.key) {
+                        } else if catalog_exhausted.contains(&gkey) {
                             format!("{} 已到底", genre.name)
                         } else {
                             format!("更多{}", genre.name)
@@ -1188,13 +1282,17 @@ impl GuiApp {
                 });
             });
         });
+        if let Some(sort) = switch_sort {
+            self.set_catalog_sort(sort);
+        }
         if let Some(genre) = more {
             self.request_catalog_page(&genre);
         }
         if refresh {
             for genre in GENRES.iter() {
-                self.catalog.remove(genre.key);
-                self.catalog_exhausted.remove(genre.key);
+                self.catalog.remove(&cat_key(genre.key, self.catalog_sort));
+                self.catalog_exhausted
+                    .remove(&cat_key(genre.key, self.catalog_sort));
                 self.request_catalog_page(genre.key);
             }
         }
@@ -1578,6 +1676,23 @@ impl CoverCache {
                 )
                 .truncate(),
             );
+            // 观看数（热度备胎）：catalog 接口的 play_cnt——排序就是按它
+            let metric = if drama.views.is_empty() {
+                drama.heat.clone()
+            } else {
+                drama.views.clone()
+            };
+            if !metric.is_empty() {
+                ui.add_sized(
+                    [COVER_W, 13.0],
+                    egui::Label::new(
+                        egui::RichText::new(format!("▶ {}", crate::model::format_count(&metric)))
+                            .size(10.0)
+                            .weak(),
+                    )
+                    .truncate(),
+                );
+            }
         });
         if clicked {
             return Some(drama.clone());

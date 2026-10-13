@@ -76,3 +76,52 @@ pub fn is_http_media_url(raw: &str) -> bool {
         Err(_) => false,
     }
 }
+
+/// 观看数字段转数值（排序用）：非数字/空串 = 0。
+pub fn count_value(raw: &str) -> f64 {
+    raw.trim().parse::<f64>().unwrap_or(0.0)
+}
+
+/// 观看数/热度展示格式：963 → "963"，946535 → "94.7万"，40329652 → "4032.97万"，
+/// 1.2e9 → "12亿"。非数字/空串原样返回（可能是 API 给的带单位文本）。
+pub fn format_count(raw: &str) -> String {
+    let Ok(v) = raw.trim().parse::<f64>() else {
+        return raw.trim().to_string();
+    };
+    if !v.is_finite() || v < 0.0 {
+        return String::new();
+    }
+    // 先修数再接单位（"4033.0" → "4033" + "万"）；1 位小数的 .0 去尾
+    if v >= 1e8 {
+        format!("{}亿", format!("{:.2}", v / 1e8).trim_end_matches('0').trim_end_matches('.'))
+    } else if v >= 1e4 {
+        format!("{}万", format!("{:.1}", v / 1e4).trim_end_matches('0').trim_end_matches('.'))
+    } else {
+        format!("{}", v as i64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_count;
+
+    #[test]
+    fn format_count_units() {
+        assert_eq!(format_count("963"), "963");
+        assert_eq!(format_count("946535"), "94.7万");
+        assert_eq!(format_count("40329652"), "4033万");
+        assert_eq!(format_count("123456789"), "1.23亿");
+        assert_eq!(format_count("1200000000"), "12亿");
+        assert_eq!(format_count(""), "");
+        assert_eq!(format_count("3.2亿"), "3.2亿"); // 非数字文本原样
+        assert_eq!(format_count("abc"), "abc");
+    }
+
+    #[test]
+    fn count_value_parses_and_defaults_zero() {
+        assert_eq!(super::count_value("946535"), 946535.0);
+        assert_eq!(super::count_value(" 86837 "), 86837.0);
+        assert_eq!(super::count_value(""), 0.0);
+        assert_eq!(super::count_value("3.2亿"), 0.0);
+    }
+}
