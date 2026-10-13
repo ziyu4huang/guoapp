@@ -777,6 +777,14 @@ impl GuiApp {
                     }
                 }
                 if self.player.is_some() {
+                    // 每部剧各自的播放记录（互不共用）
+                    let rec = self.store.state.watch.entry(drama_id.clone()).or_default();
+                    rec.last_ep = ep;
+                    rec.updated_at = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    let _ = self.store.save();
                     self.now_playing = Some(NowPlaying { drama_id, drama_title, ep, total });
                     self.ensure_next_appended();
                 }
@@ -1484,7 +1492,15 @@ impl GuiApp {
                     }
                 }
                 Some(chapters) => {
-                    ui.label(format!("共 {} 集（点选要下载的集数）", chapters.len()));
+                    // 本剧自己的播放记录（每部独立）：<= 上次播放集 = 已看
+                    let watch_last = self
+                        .store
+                        .state
+                        .watch
+                        .get(&drama.id)
+                        .map(|w| w.last_ep)
+                        .unwrap_or(0);
+                    ui.label(format!("共 {} 集（点击集数即播放 · 右键勾选要下载的）", chapters.len()));
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
                         for chapter in chapters.iter() {
@@ -1503,14 +1519,18 @@ impl GuiApp {
                                 egui::RichText::new(label_text).size(11.0);
                             if playing_this_ep {
                                 label = label.strong().color(egui::Color32::from_rgb(255, 200, 90));
+                            } else if chapter.index <= watch_last {
+                                label = label.color(egui::Color32::from_gray(120)); // 已看=灰
                             }
-                            if ui
-                                .add_sized(
-                                    [30.0, 20.0],
-                                    egui::widgets::Button::new(label).selected(picked),
-                                )
-                                .clicked()
-                            {
+                            let cell = ui.add_sized(
+                                [30.0, 20.0],
+                                egui::widgets::Button::new(label).selected(picked),
+                            );
+                            // 左键=播放这一集（默认行为）；右键=勾选/取消下载
+                            if cell.clicked() {
+                                play_ep = Some(chapter.index);
+                            }
+                            if cell.secondary_clicked() {
                                 toggled = Some(chapter.index);
                             }
                         }
@@ -1551,8 +1571,23 @@ impl GuiApp {
                             if ui.button(format!("▶ 重播第{}集", cur_ep)).clicked() {
                                 play_ep = Some(cur_ep);
                             }
-                        } else if ui.button("▶ 播放第1集").clicked() {
-                            play_ep = Some(1);
+                        } else {
+                            // 本剧有播放记录 → 续看入口（优先于从第一集开始）
+                            let last = self
+                                .store
+                                .state
+                                .watch
+                                .get(&drama.id)
+                                .map(|w| w.last_ep)
+                                .unwrap_or(0);
+                            if last > 0
+                                && last <= chapters.len()
+                                && ui.button(format!("▶ 续看第{}集", last)).clicked()
+                            {
+                                play_ep = Some(last);
+                            } else if ui.button("▶ 播放第1集").clicked() {
+                                play_ep = Some(1);
+                            }
                         }
                         ui.checkbox(autoplay_next, "连播");
                         if let Some(cur_ep) = playing_here {

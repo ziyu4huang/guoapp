@@ -28,6 +28,9 @@ pub struct State {
     /// 目录排序偏好（hgapp::SORT_*，跨启动记忆）。
     #[serde(default)]
     pub catalog_sort: String,
+    /// 每部剧各自的播放记录（互不共用；key=drama_id）。
+    #[serde(default)]
+    pub watch: BTreeMap<String, WatchRec>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -45,6 +48,15 @@ pub struct LibraryEntry {
     pub entry: String,
     pub kind: String,
     pub episodes: Vec<EpisodeEntry>,
+}
+
+/// 单部剧的播放记录（每部独立，key=drama_id）。
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct WatchRec {
+    #[serde(default)]
+    pub last_ep: usize,
+    #[serde(default)]
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Default, Clone)]

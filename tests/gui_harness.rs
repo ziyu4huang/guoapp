@@ -39,6 +39,26 @@ fn pump_until(harness: &mut H, secs: u64, mut ready: impl FnMut(&mut H) -> bool)
     panic!("pump_until: condition not met within {}s", secs);
 }
 
+/// 右键点击（勾选/取消下载）：egui_kittest 只有左键 helper，
+/// 这里注入原生 PointerButton 事件（坐标取节点 bounds 中心）。
+fn right_click(h: &mut H, label: &str) {
+    let pos = {
+        let node = h.get_by_role_and_label(accesskit::Role::Button, label);
+        let b = node.raw_bounds().expect("节点无 bounds");
+        egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)
+    };
+    h.input_mut().events.push(egui::Event::PointerMoved(pos));
+    for pressed in [true, false] {
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: Default::default(),
+        });
+    }
+    h.run_steps(2);
+}
+
 /// 点顶部分页（selectable_value 在 accesskit 中是带 toggled 的 Button）。
 fn click_tab(harness: &mut H, label: &str) {
     let tab = harness
@@ -191,13 +211,11 @@ fn gui_full_flow() {
     save_png(&mut harness, "guo-kit-detail.png");
 
     // 4. 只保留第 1 集选中：取消其余集数（详情默认全选）
-    eprintln!("选中剧：{}，全不选后仅选第 1 集下载", shortest_title);
+    eprintln!("选中剧：{}，全不选后右键勾选第 1 集（左键=播放）", shortest_title);
     harness.run_steps(2);
     harness.get_by_label("全不选").click();
     harness.run_steps(2);
-    harness
-        .get_by_role_and_label(accesskit::Role::Button, "1")
-        .click();
+    right_click(&mut harness, "1");
     harness.run_steps(2);
     harness
         .get_by_label_contains("下载选中")
@@ -217,4 +235,62 @@ fn gui_full_flow() {
     });
     save_png(&mut harness, "guo-kit-library-tab.png");
 
+}
+
+/// 新交互语义：左键点集数格=直接播放该集（出现「正在播放」），
+/// 右键=勾选/取消下载（计数变化）。真串流。
+/// 运行：cargo test --test gui_harness episode_cell_semantics -- --ignored
+#[test]
+#[ignore]
+fn episode_cell_semantics() {
+    std::env::set_var("GUOAPP_DATA", temp_data_dir());
+    let mut harness: H = Harness::builder()
+        .with_size(egui::vec2(1180.0, 760.0))
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| guo::gui::GuiApp::new(cc));
+
+    pump_until(&mut harness, 60, |h| {
+        h.query_all_by_label_contains("共").count() >= 20
+    });
+    const FIXED: [&str; 3] = ["清空封面缓存", "刷新", "搜索"];
+    let title = harness
+        .query_all_by(|node| {
+            node.role() == accesskit::Role::Button && node.toggled().is_none()
+        })
+        .filter_map(|node| node.label().map(|l| l.to_string()))
+        .find(|label| {
+            !FIXED.contains(&label.as_str())
+                && !label.starts_with("更多")
+                && !label.starts_with("真人剧")
+                && !label.starts_with("漫剧")
+                && !label.starts_with("AI剧")
+                && !label.starts_with("⬇")
+                && !label.starts_with("▶")
+                && label.chars().count() > 2
+        })
+        .expect("no cards");
+    harness
+        .get_by_role_and_label(accesskit::Role::Button, &title)
+        .click();
+    pump_until(&mut harness, 40, |h| {
+        h.query_by_label_contains("点击集数即播放").is_some()
+    });
+
+    // A. 左键点集格 1 = 播放该集（不是勾选下载）
+    harness
+        .get_by_role_and_label(accesskit::Role::Button, "1")
+        .click();
+    pump_until(&mut harness, 40, |h| {
+        h.query_by_label_contains("正在播放：第1集").is_some()
+    });
+    eprintln!("✓ 左键点集数格 = 直接播放该集");
+
+    // B. 右键点集格 2 = 勾选下载（先全不选，计数应为 1）
+    harness.get_by_label("全不选").click();
+    harness.run_steps(2);
+    right_click(&mut harness, "2");
+    pump_until(&mut harness, 5, |h| {
+        h.query_by_label_contains("下载选中（1）").is_some()
+    });
+    eprintln!("✓ 右键点集数格 = 勾选/取消下载");
 }

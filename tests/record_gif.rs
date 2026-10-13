@@ -171,13 +171,26 @@ fn record_demo_gif() {
     assert!(opened, "详情未展开");
     rec.record(&mut harness, 1200, 260);
 
-    // D. 只选第 1 集 → 下载选中 → 切片库看进度条
+    // D. 全不选后右键勾选第 1 集（左键=播放）→ 下载选中 → 切片库看进度条
     harness.get_by_label("全不选").click();
     harness.run_steps(2);
     rec.snap(&mut harness);
-    harness
-        .get_by_role_and_label(accesskit::Role::Button, "1")
-        .click();
+    {
+        let pos = {
+            let node = harness.get_by_role_and_label(accesskit::Role::Button, "1");
+            let b = node.raw_bounds().expect("节点无 bounds");
+            egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)
+        };
+        harness.input_mut().events.push(egui::Event::PointerMoved(pos));
+        for pressed in [true, false] {
+            harness.input_mut().events.push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: Default::default(),
+            });
+        }
+    }
     harness.run_steps(2);
     harness.get_by_label_contains("下载选中").click();
     rec.record(&mut harness, 500, 200);
