@@ -1,0 +1,14 @@
+name: 功能建议
+description: 想要的功能、更好的交互
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: 想要什么（解决什么问题）
+    validations:
+      required: true
+  - type: textarea
+    id: alt
+    attributes:
+      label: 现在的替代方案（如果有）

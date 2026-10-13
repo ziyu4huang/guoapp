@@ -20,6 +20,10 @@ release 下 CLI 约 **1.5 MB**、GUI 约 **4.0 MB**，单文件、无运行时�
 | --- | --- | --- |
 | ![目录](docs/shots/catalog.png) | ![详情](docs/shots/detail.png) | ![片库](docs/shots/library.png) |
 
+**反馈**：遇到问题（闪跳、下载失败、界面异常）或想要新功能？
+[开个 Issue](https://github.com/ziyu4huang/guoapp/issues/new/choose)，
+bug 请附 `guo --version`、平台与数据目录里的 `mpv-last.log` 尾部。
+
 **🎬 视频演示**:[在电脑上追短剧——全功能演示](https://www.bilibili.com/video/BV1bCpZ6BEtb)(B站) ·
 [YouTube](https://youtu.be/jkY7YnxR-b4)
 

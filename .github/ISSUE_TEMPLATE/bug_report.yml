@@ -1,0 +1,45 @@
+name: Bug 反馈
+description: 播放闪跳、下载失败、界面异常等问题
+labels: [bug]
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows x64
+        - Linux x64
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: guo 版本（guo --version 或 Release 页下载的 tag）
+      placeholder: v0.3.1
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 问题区域
+      options:
+        - 在线播放（串流）
+        - 下载 / 解密
+        - 目录 / 搜索
+        - 界面显示
+        - CLI 命令
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么（复现步骤 + 预期 vs 实际）
+      placeholder: |
+        1. 打开 …
+        2. 点击 …
+        实际：…（贴 mpv-last.log / 终端输出更好）
+    validations:
+      required: true
