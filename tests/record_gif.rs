@@ -423,6 +423,96 @@ fn eof_keepopen_session_alive_then_loadfile_next() {
     eprintln!("✓ 会话退出干净");
 }
 
+/// 连播连续感 E2E：第一集开播后 append 第二集进播放列表，之后**客户端不再发
+/// 任何命令**——两个 end-file eof 之间必须由 mpv 内部完成切换（prefetch 预载
+/// 下接近零黑屏）。这是「播下一集不要跳」的机制证明。
+/// 运行：cargo test --test record_gif append_seamless -- --ignored --nocapture
+#[test]
+#[ignore]
+fn append_playlist_seamless_next() {
+    use guo::player::{self, PlayItem, PlayerEvent};
+
+    std::env::set_var("GUO_MPV_ARGS", "--vo=null --ao=null");
+    let dir = std::env::temp_dir().join(format!("guo-append-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("tmp dir");
+    let clip = |name: &str, color: &str, freq: &str| {
+        let p = dir.join(name);
+        let st = std::process::Command::new("ffmpeg")
+            .args([
+                "-y", "-loglevel", "error",
+                "-f", "lavfi", "-i", &format!("color=c={color}:s=320x240:d=2"),
+                "-f", "lavfi", "-i", &format!("sine=frequency={freq}:duration=2"),
+                "-pix_fmt", "yuv420p", "-shortest", "-c:v", "libx264",
+            ])
+            .arg(&p)
+            .status()
+            .expect("ffmpeg");
+        assert!(st.success(), "ffmpeg 生成失败: {}", name);
+        p
+    };
+    let ep1 = clip("a_ep1.mp4", "red", "440");
+    let ep2 = clip("a_ep2.mp4", "blue", "600");
+    let item = |p: &std::path::Path, title: &str| PlayItem {
+        url: p.display().to_string(),
+        referer: String::new(),
+        key: None,
+        title: title.into(),
+    };
+
+    let (kind, program) = player::resolve_player();
+    let ipc = player::ipc_path();
+    let log = dir.join("mpv-append.log");
+    let mut session = player::PlayerSession::launch(
+        kind,
+        &program,
+        &item(&ep1, "测试第1集"),
+        &ipc,
+        &log,
+        true,
+        &Default::default(),
+    )
+    .expect("launch mpv");
+
+    let running = session.running_flag();
+    let (ev_tx, ev_rx) = std::sync::mpsc::channel();
+    let ev_ipc = session.ipc.clone();
+    std::thread::spawn(move || {
+        player::event_loop(&ev_ipc, &running, move |ev| ev_tx.send(ev).is_ok())
+    });
+
+    let wait_ended = |what: &str, secs: u64| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+        loop {
+            match ev_rx.recv_timeout(std::time::Duration::from_secs(1)) {
+                Ok(PlayerEvent::Ended) => return,
+                Ok(_) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if std::time::Instant::now() > deadline {
+                        panic!("{what}: {}s 内未等到 eof", secs);
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    panic!("{what}: 事件通道关闭（reader 线程已退出）")
+                }
+            }
+        }
+    };
+    // 播放中（第一集还没完）就预载第二集——与 GUI 的 ensure_next_appended
+    // 同时机；此后客户端零命令，两集之间全靠 mpv 内部切换
+    session.append(&item(&ep2, "测试第2集")).expect("append ep2 (mid-play)");
+    eprintln!("step: 播放中 append ep2（此后客户端零命令）");
+    wait_ended("第一集开播→播完", 30);
+    eprintln!("✓ 第一集播完（end-file eof）");
+    wait_ended("第二集自动接播", 30);
+    eprintln!("✓ mpv 内部自动切换到第二集并播到底（零命令=无缝）");
+    assert!(session.process_alive(), "自动接播全程进程存活");
+
+    session.quit();
+    assert!(!session.process_alive(), "quit 后进程应已退出");
+    let _ = std::fs::remove_dir_all(&dir);
+    eprintln!("✓ 会话退出干净");
+}
+
 /// GUI 播放链路冒烟:点「▶ 播放第1集」→ 状态「▶ 正在播放」→ 详情面板出现
 /// 「正在播放:第1集」+ 集数格「▶1」标记 + 底栏常驻播放指示。
 /// GUO_MPV_ARGS=--vo=null --ao=null 由测试自身注入(无头环境 mpv 真窗口起不来)。

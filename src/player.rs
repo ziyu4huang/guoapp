@@ -207,6 +207,8 @@ pub fn session_option_args(kind: PlayerKind, keepalive: bool) -> Vec<String> {
     if keepalive {
         args.push(format!("{}=yes", kind.opt("idle")));
         args.push(format!("{}=yes", kind.opt("force-window")));
+        // 预取播放列表里的下一集（append 进来的）：播完瞬间切画面而非从零起播
+        args.push(format!("{}=yes", kind.opt("prefetch-playlist")));
     }
     args
 }
@@ -471,6 +473,22 @@ impl PlayerSession {
         p
     }
 
+    /// 更新窗口标题/OSC 显示的集名（连播自动切换时就地推进，不等下一条命令）。
+    pub fn set_title(&self, title: &str) -> std::io::Result<()> {
+        let mut conn = open_ipc(&self.ipc)?;
+        let reply = send_cmd_with_reply(
+            &mut conn,
+            &format!("{{\"command\": [\"set_property\", \"force-media-title\", {:?}]}}\n", title),
+        )?;
+        if !reply.contains("\"error\":\"success\"") {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("set_property 被拒绝：{}", reply.trim()),
+            ));
+        }
+        Ok(())
+    }
+
     /// 进程是否还活着（探测，不收割 zombies 之外的语义）。
     pub fn process_alive(&mut self) -> bool {
         matches!(self.child.try_wait(), Ok(None))
@@ -485,11 +503,46 @@ impl PlayerSession {
     /// mpv 在起播/缓冲忙碌期对 IPC 命令的回执可能 >5s（实测偶发）——超时类
     /// 错误自动重试（每次全新连接），被拒绝类错误当场返回不重试。
     pub fn load(&self, item: &PlayItem) -> std::io::Result<()> {
+        Self::with_retry(|| Self::load_once_at(&self.ipc, item, "replace"))
+    }
+
+    /// 预载下一集进播放列表（append）：当前集自然播完时 mpv **内部直接切换**
+    /// 到已预载的下一集——无 IPC 往返、无黑屏等待，这是连播「连续感」的根基；
+    /// 配合 `--prefetch-playlist=yes`（连播形态默认开）还会提前缓冲下一集。
+    /// per-file 的 referrer/解密金钥随条目保存，切换后照常生效。
+    pub fn append(&self, item: &PlayItem) -> std::io::Result<()> {
+        Self::with_retry(|| Self::load_once_at(&self.ipc, item, "append"))
+    }
+
+    /// 清空播放列表中除当前播放外的全部条目（丢弃预载/过期的「下一集」）。
+    /// 手动点集（loadfile replace 前必须调）与关连播时防止陈旧条目自动接播。
+    pub fn playlist_clear(&self) -> std::io::Result<()> {
+        Self::with_retry(|| {
+            let mut conn = open_ipc(&self.ipc)?;
+            let reply = send_cmd_with_reply(&mut conn, "{\"command\": [\"playlist-clear\"]}\n")?;
+            if !reply.contains("\"error\":\"success\"") {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("playlist-clear 被拒绝：{}", reply.trim()),
+                ));
+            }
+            Ok(())
+        })
+    }
+
+    fn with_retry(mut op: impl FnMut() -> std::io::Result<()>) -> std::io::Result<()> {
         let mut last_err: Option<std::io::Error> = None;
         for _ in 0..3 {
-            match self.load_once(item) {
+            match op() {
                 Ok(()) => return Ok(()),
-                Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                // WouldBlock/TimedOut=mpv 忙碌期回执慢；NotFound=socket 尚未建好
+                //（本地缓存命中时 resolve 可能快过 mpv 初始化）——都值得重试
+                Err(e) if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::NotFound
+                ) => {
                     last_err = Some(e);
                     std::thread::sleep(std::time::Duration::from_millis(300));
                 }
@@ -499,41 +552,43 @@ impl PlayerSession {
         Err(last_err.unwrap_or_else(|| std::io::Error::other("load 重试耗尽")))
     }
 
-    fn load_once(&self, item: &PlayItem) -> std::io::Result<()> {
-        let mut conn = open_ipc(&self.ipc)?;
-        // 标题先 set 再 loadfile：命令在 mpv 侧按序执行。
-        let title_reply = send_cmd_with_reply(&mut conn, &format!(
-            "{{\"command\": [\"set_property\", \"force-media-title\", {:?}]}}\n",
-            item.title
-        ))?;
-        if !title_reply.contains("\"error\":\"success\"") {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("set_property 被拒绝：{}", title_reply.trim()),
-            ));
-        }
-        let mut load = format!(
-            "{{\"command\": [\"loadfile\", {:?}, \"replace\"]}}\n",
-            item.url
-        );
-        // referer/key 属于 demuxer 级选项，换集时随文件一起换
-        // （loadfile 第 4 参 = per-file 选项，mpv ≥0.37）。
+    /// loadfile 命令构造（replace=换集 / append=预载）。referer/key 属 demuxer
+    /// 级选项，随 per-file 选项（第 5 参，mpv ≥0.37）一起走，切换后照常生效。
+    fn loadfile_cmd(item: &PlayItem, mode: &str) -> String {
         let mut opts: Vec<String> = Vec::new();
         if !item.referer.is_empty() {
             opts.push(format!("referrer={}", item.referer));
         }
         if let Some(key) = &item.key {
-            opts.push(format!(
-                "demuxer-lavf-o=decryption_key={key}"
-            ));
+            opts.push(format!("demuxer-lavf-o=decryption_key={key}"));
         }
-        if !opts.is_empty() {
-            load = format!(
-                "{{\"command\": [\"loadfile\", {:?}, \"replace\", -1, {:?}]}}\n",
+        if opts.is_empty() {
+            format!("{{\"command\": [\"loadfile\", {:?}, \"{mode}\"]}}\n", item.url)
+        } else {
+            format!(
+                "{{\"command\": [\"loadfile\", {:?}, \"{mode}\", -1, {:?}]}}\n",
                 item.url,
                 opts.join(",")
-            );
+            )
         }
+    }
+
+    fn load_once_at(ipc: &Path, item: &PlayItem, mode: &str) -> std::io::Result<()> {
+        let mut conn = open_ipc(ipc)?;
+        // 标题只在 replace 时同步（append 的下一集标题由 GUI 在换集时机更新）
+        if mode == "replace" {
+            let title_reply = send_cmd_with_reply(&mut conn, &format!(
+                "{{\"command\": [\"set_property\", \"force-media-title\", {:?}]}}\n",
+                item.title
+            ))?;
+            if !title_reply.contains("\"error\":\"success\"") {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("set_property 被拒绝：{}", title_reply.trim()),
+                ));
+            }
+        }
+        let load = Self::loadfile_cmd(item, mode);
         let load_reply = send_cmd_with_reply(&mut conn, &load)?;
         if !load_reply.contains("\"error\":\"success\"") {
             return Err(std::io::Error::new(
@@ -793,6 +848,8 @@ mod tests {
             // 连播形态：eof 后进程/窗口存活，end-file eof 事件照常发
             assert!(has(&format!("{}=yes", kind.opt("idle"))), "{args:?}");
             assert!(has(&format!("{}=yes", kind.opt("force-window"))), "{args:?}");
+            // 预载下一集的预取（连续感的另一半：提前缓冲）
+            assert!(has(&format!("{}=yes", kind.opt("prefetch-playlist"))), "{args:?}");
             assert!(!has("keep-open"), "keep-open 方案已废弃（end-file 不发）: {args:?}");
             assert!(has(&format!("{}=auto", kind.opt("hwdec"))), "{args:?}");
             // IPC/剧集参数不属于会话级选项
@@ -862,6 +919,28 @@ mod tests {
     fn window_bounds_probe_returns_gracefully() {
         // pid 0（内核）无窗口 → None 而非崩溃/挂起（macOS FFI 链路烟测）
         assert_eq!(window_bounds_for_pid(0), None);
+    }
+
+    #[test]
+    fn loadfile_cmd_modes_and_per_file_opts() {
+        let item = PlayItem {
+            url: "https://x/v".into(),
+            referer: "https://r/".into(),
+            key: Some("aabb".into()),
+            title: "《剧》第2集".into(),
+        };
+        // replace 与 append 只差模式字串；per-file 选项两条路都带
+        for mode in ["replace", "append"] {
+            let cmd = PlayerSession::loadfile_cmd(&item, mode);
+            assert!(cmd.contains(&format!("\"{mode}\"")), "{cmd}");
+            assert!(cmd.contains("referrer=https://r/"), "{cmd}");
+            assert!(cmd.contains("decryption_key=aabb"), "{cmd}");
+            assert!(cmd.contains("-1"), "{cmd}");
+        }
+        // 无 per-file 选项时走短形态
+        let bare = PlayItem { url: "u".into(), referer: String::new(), key: None, title: "t".into() };
+        let cmd = PlayerSession::loadfile_cmd(&bare, "append");
+        assert!(cmd.starts_with("{\"command\": [\"loadfile\", \"u\", \"append\"]}"), "{cmd}");
     }
 
     #[test]

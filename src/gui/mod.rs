@@ -160,6 +160,17 @@ enum Msg {
     },
     /// 后台捕获到的播放器窗口/设定快照（存 state.json，下次启动恢复）。
     PlayerPrefs(crate::player::PlayerPrefs),
+    /// 播放器载入完成了一个文件（含连播自动切换的下一集）——GUI 借此推进
+    /// 「确保下一集已预载」链。
+    PlayerFileLoaded,
+    /// 下一集取流完成，可 append 进播放列表（连播预载）。
+    AppendReady {
+        drama_id: String,
+        ep: usize,
+        url: String,
+        referer: String,
+        key: Option<String>,
+    },
     Status(String),
 }
 
@@ -204,6 +215,11 @@ pub struct GuiApp {
     player: Option<crate::player::PlayerSession>,
     /// 播放请求代数（防过期 resolve 回包串台）。
     play_seq: u64,
+    /// 已预载进 mpv 播放列表的下一集（drama_id, ep）——当前集播完时 mpv
+    /// 内部直接切换，无黑屏等待。
+    appended_next: Option<(String, usize)>,
+    /// 正在后台解析的「下一集」集号（防重复解析）。
+    append_in_flight: Option<usize>,
     now_playing: Option<NowPlaying>,
     /// 播完自动接下一集。
     autoplay_next: bool,
@@ -248,6 +264,8 @@ impl GuiApp {
             status: ("就绪".into(), std::time::Instant::now()),
             player: None,
             play_seq: 0,
+            appended_next: None,
+            append_in_flight: None,
             now_playing: None,
             autoplay_next: true,
         };
@@ -414,6 +432,54 @@ impl GuiApp {
         }
     }
 
+    /// 确保「下一集」已在后台解析并 append 进 mpv 播放列表——当前集自然播完
+    /// 时 mpv 内部直接切换（零黑屏），这是连播连续感的根基。幂等：已预载/
+    /// 已在解析/没有下一集/关连播时不动。每次集开播（PlayReady/FileLoaded）调用。
+    fn ensure_next_appended(&mut self) {
+        let Some(np) = self.now_playing.as_ref() else { return };
+        if !self.autoplay_next {
+            return;
+        }
+        let next = np.ep + 1;
+        if next > np.total
+            || self.appended_next.as_ref().is_some_and(|(_, n)| *n == next)
+            || self.append_in_flight == Some(next)
+        {
+            return;
+        }
+        let Some(detail) = self.detail.as_ref() else { return };
+        if detail.drama.id != np.drama_id {
+            return;
+        }
+        let Some(chapter) = detail
+            .chapters
+            .as_ref()
+            .and_then(|cs| cs.iter().find(|c| c.index == next).cloned())
+        else {
+            return;
+        };
+        let series_id = detail.drama.source_id.clone();
+        let drama_id = np.drama_id.clone();
+        let client = self.client.clone();
+        let store = self.store.clone();
+        let tx = self.tx.clone();
+        self.append_in_flight = Some(next);
+        thread::spawn(move || match media::try_resolve_media(&client, &store, &series_id, &chapter.video_id) {
+            Ok(resolved) => {
+                let _ = tx.send(Msg::AppendReady {
+                    drama_id,
+                    ep: next,
+                    url: resolved.url,
+                    referer: resolved.referer,
+                    key: resolved.cenc_key.map(hex::encode),
+                });
+            }
+            Err(err) => {
+                let _ = tx.send(Msg::Status(format!("下一集预载失败（播完后再取）：{}", err)));
+            }
+        });
+    }
+
     fn request_play(&mut self, ep: usize) {
         let Some(detail) = self.detail.as_ref() else { return };
         let Some(chapter) = detail.chapters.as_ref().and_then(|cs| cs.iter().find(|c| c.index == ep).cloned()) else {
@@ -542,6 +608,10 @@ impl GuiApp {
                     key,
                     title: format!("《{}》第{}集", drama_title, ep),
                 };
+                // 手动换集：清掉播放列表里预载的旧「下一集」（防止播完错接），
+                // 并复位预载状态——新的下一集由本集开播后重新预载。
+                self.appended_next = None;
+                let _ = self.player.as_mut().map(|s| s.playlist_clear());
                 // 单实例：会话还活着且 IPC 可达 → 直接换集（不闪新窗口）。
                 let reuse = match self.player.as_mut() {
                     Some(s) => {
@@ -606,7 +676,7 @@ impl GuiApp {
                                         }
                                         crate::player::PlayerEvent::FileLoaded => {
                                             snapshot(&ipc_for_reader);
-                                            None
+                                            Some(Msg::PlayerFileLoaded)
                                         }
                                         // 换集/启动类事件：GUI 不需要（标题等已随命令下发）
                                         crate::player::PlayerEvent::Replaced => None,
@@ -635,6 +705,40 @@ impl GuiApp {
                 }
                 if self.player.is_some() {
                     self.now_playing = Some(NowPlaying { drama_id, drama_title, ep, total });
+                    self.ensure_next_appended();
+                }
+            }
+            Msg::PlayerFileLoaded => {
+                // 每个文件真正载入（含连播自动切换的下一集）后确保再下一集已预载
+                self.ensure_next_appended();
+            }
+            Msg::AppendReady { drama_id, ep, url, referer, key } => {
+                self.append_in_flight = None;
+                // 上台守卫：必须仍是「正在播 ep-1」的同剧目会话，且连播还开着、
+                // 播放器还活着——手动换集/关连播/换剧后回来的过期预载一律丢弃。
+                let ok = self
+                    .now_playing
+                    .as_ref()
+                    .is_some_and(|np| {
+                        np.drama_id == drama_id && np.ep + 1 == ep && self.autoplay_next
+                    });
+                if !ok {
+                    return;
+                }
+                let Some(s) = self.player.as_ref() else { return };
+                if !s.ipc_ready() {
+                    return;
+                }
+                let np = self.now_playing.as_ref().unwrap();
+                let item = crate::player::PlayItem {
+                    url,
+                    referer,
+                    key,
+                    title: format!("《{}》第{}集", np.drama_title, ep),
+                };
+                if s.append(&item).is_ok() {
+                    self.appended_next = Some((drama_id, ep));
+                    self.set_status(format!("已预载第{}集，播完无缝接上", ep));
                 }
             }
             Msg::PlayerEnded { reason } => {
@@ -648,9 +752,41 @@ impl GuiApp {
                         crate::player::autoplay_next_ep(&reason, self.autoplay_next, np.ep, np.total)
                     });
                 if let Some(next_ep) = request {
-                    self.set_status(format!("第{}集 播完，自动接第{}集…", next_ep - 1, next_ep));
-                    self.request_play(next_ep);
+                    // 已预载 → mpv 正在内部切换（或即将切），不需要再取流；
+                    // 状态与「正在播」标记就地推进，等 PlayerFileLoaded 补预载再下一集。
+                    let preloaded = self
+                        .appended_next
+                        .as_ref()
+                        .is_some_and(|(did, n)| {
+                            *n == next_ep
+                                && self
+                                    .now_playing
+                                    .as_ref()
+                                    .is_some_and(|np| np.drama_id == *did)
+                        });
+                    if preloaded {
+                        if let Some(np) = self.now_playing.as_mut() {
+                            np.ep = next_ep;
+                        }
+                        if let Some(np) = self.now_playing.as_ref() {
+                            if let Some(s) = self.player.as_ref() {
+                                let title = format!("《{}》第{}集", np.drama_title, next_ep);
+                                let _ = s.set_title(&title);
+                            }
+                        }
+                        self.set_status(format!("第{}集 播完，无缝接第{}集", next_ep - 1, next_ep));
+                    } else {
+                        // 未预载（解析慢/关过连播又开/预载失败）：退回取流路径
+                        self.set_status(format!("第{}集 播完，自动接第{}集…", next_ep - 1, next_ep));
+                        self.request_play(next_ep);
+                    }
                 } else if reason == "eof" {
+                    // 关着连播却还有预载条目 → 立刻丢弃，防 mpv 自动接播
+                    if self.appended_next.take().is_some() {
+                        if let Some(s) = self.player.as_ref() {
+                            let _ = s.playlist_clear();
+                        }
+                    }
                     let label = self
                         .now_playing
                         .as_ref()
