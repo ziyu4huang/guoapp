@@ -32,6 +32,9 @@ pub struct Chapter {
     pub title: String,
     #[serde(rename = "video_id")]
     pub video_id: String,
+    /// 本地已下载文件路径（片库内建播放用；串流章节=false）
+    #[serde(default)]
+    pub local: bool,
 }
 
 #[derive(Clone, Debug, Default)]

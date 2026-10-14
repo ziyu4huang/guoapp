@@ -236,6 +236,7 @@ fn ipc_session_live() {
         referer: m.referer.clone(),
         key: m.cenc_key.as_ref().map(|k| hex::encode(k)),
         title: format!("《世子爷他要以身相许》第{}集", ep),
+        start: 0,
     };
 
     let (kind, program) = player::resolve_player();
@@ -346,6 +347,7 @@ fn eof_keepopen_session_alive_then_loadfile_next() {
         referer: String::new(),
         key: None,
         title: title.into(),
+        start: 0,
     };
 
     let (kind, program) = player::resolve_player();
@@ -473,6 +475,7 @@ fn append_playlist_seamless_next() {
         referer: String::new(),
         key: None,
         title: title.into(),
+        start: 0,
     };
 
     let (kind, program) = player::resolve_player();

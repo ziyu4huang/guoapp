@@ -565,6 +565,7 @@ pub fn parse_app_detail(result: &Value, series_id: &str) -> Result<(Drama, Vec<C
             return Err("红果 App 返回了重复分集".into());
         }
         chapters.push(Chapter {
+                local: false,
             index: index as usize,
             title: format!("第{}集", index),
             video_id,

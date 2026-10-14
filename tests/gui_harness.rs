@@ -362,3 +362,62 @@ fn watch_survives_detail_close() {
     });
     eprintln!("✓ 关详情后底栏「下一集」真实推进到第 2 集（解耦成立）");
 }
+
+/// 片库内建播放 E2E：预置 library.json（本地 2s 片）→ 片库 → 点 ▶1 →
+/// 状态出现「正在播放」——下載內容不再丟給系統播放器，走同一套 mpv 會話。
+/// 运行：cargo test --test gui_harness library_builtin_play -- --ignored
+#[test]
+#[ignore]
+fn library_builtin_play() {
+    std::env::set_var("GUO_MPV_ARGS", "--vo=null --ao=null");
+    let data = temp_data_dir();
+    std::fs::create_dir_all(&data).unwrap();
+    // 生成 2s 本地样片
+    let ep_dir = data.join("test-drama").join("ep_001");
+    std::fs::create_dir_all(&ep_dir).unwrap();
+    let clip = ep_dir.join("media.mp4");
+    let st = std::process::Command::new("ffmpeg")
+        .args([
+            "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", "color=c=green:s=320x240:d=2",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+            "-pix_fmt", "yuv420p", "-shortest", "-c:v", "libx264",
+        ])
+        .arg(&clip)
+        .status()
+        .expect("ffmpeg");
+    assert!(st.success());
+    // 预写 library.json（Store::load 会读）
+    let library = serde_json::json!({
+        "hongguo:testlocal": {
+            "drama_id": "hongguo:testlocal",
+            "title": "测试本地剧",
+            "dir": ep_dir.parent().unwrap().display().to_string(),
+            "entry": "",
+            "kind": "mp4",
+            "episodes": [{ "index": 1, "quality": 1080, "file": "media.mp4" }]
+        }
+    });
+    std::fs::write(
+        data.join("library.json"),
+        serde_json::to_vec_pretty(&library).unwrap(),
+    )
+    .unwrap();
+    std::env::set_var("GUOAPP_DATA", &data);
+
+    let mut harness: H = Harness::builder()
+        .with_size(egui::vec2(1180.0, 760.0))
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| guo::gui::GuiApp::new(cc));
+
+    click_tab(&mut harness, "片库 (1)");
+    harness.run_steps(2);
+    // ▶1 = 内建播放（不再是系统播放器）
+    harness
+        .get_by_role_and_label(accesskit::Role::Button, "▶1")
+        .click();
+    pump_until(&mut harness, 30, |h| {
+        h.query_all_by_label_contains("》第1集").count() >= 1
+    });
+    eprintln!("✓ 片库 ▶ 内建播放：本地集走 mpv 会话（底栏可见）");
+}

@@ -99,6 +99,8 @@ pub struct PlayItem {
     pub key: Option<String>,
     /// 展示标题（《剧名》第N集），进窗口标题与 OSC。
     pub title: String,
+    /// 从第 N 秒起播（精确续看；0=从头）。
+    pub start: u64,
 }
 
 impl PlayItem {
@@ -112,6 +114,9 @@ impl PlayItem {
         }
         if let Some(key) = &self.key {
             args.push(format!("--demuxer-lavf-o=decryption_key={key}"));
+        }
+        if self.start > 0 {
+            args.push(format!("--start={}", self.start));
         }
         args
     }
@@ -562,6 +567,9 @@ impl PlayerSession {
         if let Some(key) = &item.key {
             opts.push(format!("demuxer-lavf-o=decryption_key={key}"));
         }
+        if item.start > 0 {
+            opts.push(format!("start={}", item.start));
+        }
         if opts.is_empty() {
             format!("{{\"command\": [\"loadfile\", {:?}, \"{mode}\"]}}\n", item.url)
         } else {
@@ -699,6 +707,18 @@ impl IpcConn {
     }
 }
 
+/// 读一个数值型属性（time-pos/duration 等取样用）；不可用/出错 → None。
+pub fn get_property_u64(ipc: &Path, name: &str) -> Option<u64> {
+    let mut conn = open_ipc(ipc).ok()?;
+    let reply = send_cmd_with_reply(
+        &mut conn,
+        &format!("{{\"command\": [\"get_property\", \"{name}\"]}}\n"),
+    )
+    .ok()?;
+    let v: serde_json::Value = serde_json::from_str(reply.trim()).ok()?;
+    v.get("data")?.as_f64().map(|f| f.max(0.0) as u64)
+}
+
 fn open_ipc(path: &Path) -> std::io::Result<IpcConn> {
     #[cfg(unix)]
     {
@@ -721,7 +741,7 @@ fn send_cmd(conn: &mut IpcConn, line: &str) -> std::io::Result<()> {
 
 /// 发送并读回执（mpv 对每条命令回一行 {"error":...}）；被拒绝时可见具体原因。
 /// 5s 读超时：mpv 不回时报错而非永久挂起（事件循环连接不受影响，各自独立）。
-fn send_cmd_with_reply(conn: &mut IpcConn, line: &str) -> std::io::Result<String> {
+pub fn send_cmd_with_reply(conn: &mut IpcConn, line: &str) -> std::io::Result<String> {
     conn.set_read_timeout_secs(5)?;
     conn.write_all(line.as_bytes())?;
     let mut reply = Vec::new();
@@ -928,6 +948,7 @@ mod tests {
             referer: "https://r/".into(),
             key: Some("aabb".into()),
             title: "《剧》第2集".into(),
+            start: 0,
         };
         // replace 与 append 只差模式字串；per-file 选项两条路都带
         for mode in ["replace", "append"] {
@@ -938,7 +959,7 @@ mod tests {
             assert!(cmd.contains("-1"), "{cmd}");
         }
         // 无 per-file 选项时走短形态
-        let bare = PlayItem { url: "u".into(), referer: String::new(), key: None, title: "t".into() };
+        let bare = PlayItem { url: "u".into(), referer: String::new(), key: None, title: "t".into(), start: 0 };
         let cmd = PlayerSession::loadfile_cmd(&bare, "append");
         assert!(cmd.starts_with("{\"command\": [\"loadfile\", \"u\", \"append\"]}"), "{cmd}");
     }
@@ -976,12 +997,18 @@ mod tests {
 
     #[test]
     fn item_args_cover_title_key_referer() {
-        let item = PlayItem {
+        let mut item = PlayItem {
             url: "https://x/video".into(),
             referer: "https://novel.snssdk.com/".into(),
             key: Some("aabb".into()),
             title: "《剧》第2集".into(),
+            start: 0,
         };
+        assert!(!item.mpv_args().iter().any(|a| a.starts_with("--start")), "start=0 不下发");
+        item.start = 750;
+        assert!(item.mpv_args().iter().any(|a| a == "--start=750"), "{:?}", item.mpv_args());
+        let cmd = PlayerSession::loadfile_cmd(&item, "replace");
+        assert!(cmd.contains("start=750"), "{cmd}");
         let args = item.mpv_args();
         assert!(args.contains(&"--force-media-title=《剧》第2集".to_string()));
         assert!(args.contains(&"--title=《剧》第2集".to_string()));

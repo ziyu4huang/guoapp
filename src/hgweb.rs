@@ -152,6 +152,7 @@ impl HgClient {
             }
             let idx = index + 1;
             chapters.push(Chapter {
+                local: false,
                 index: idx,
                 title: format!("第{}集", idx),
                 video_id,

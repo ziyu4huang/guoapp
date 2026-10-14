@@ -444,6 +444,11 @@ fn play(client: &HgClient, store: &Store, rest: &[String]) -> i32 {
                 referer: media.referer.clone(),
                 key: media.cenc_key.as_ref().map(|k| hex::encode(k)),
                 title: format!("《{}》第{}集", drama.title, episode),
+                // CLI 支援 --from 秒数（精确续看同款机制）
+                start: flags
+                    .get("from")
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(0),
             };
             let ipc = guo::player::ipc_path();
             let log_path = store.dir.join("mpv-last.log");

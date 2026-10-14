@@ -178,6 +178,8 @@ enum Msg {
         url: String,
         referer: String,
         key: Option<String>,
+        /// 起播秒数（精确续看；0=从头）
+        start: u64,
         /// 请求代数：request_play 每次递增，回包时对不上号 = 过期请求
         /// （连点/连播与手动点击并发时后完成的 resolve 不得抢播）。
         seq: u64,
@@ -188,6 +190,8 @@ enum Msg {
     },
     /// 后台捕获到的播放器窗口/设定快照（存 state.json，下次启动恢复）。
     PlayerPrefs(crate::player::PlayerPrefs),
+    /// 播放位置取样（每 5s）：写进该剧的播放记录 → 精确续看「从 12:30 继续」。
+    WatchPos { pos: u64, dur: u64 },
     /// 播放器载入完成了一个文件（含连播自动切换的下一集）——GUI 借此推进
     /// 「确保下一集已预载」链。
     PlayerFileLoaded,
@@ -273,6 +277,8 @@ struct WatchSession {
     drama: Drama,
     chapters: Vec<Chapter>,
     ep: usize,
+    /// 本地已下载会话（片库内建播放）：预载/下一集走本地文件，不走取流
+    is_local: bool,
 }
 
 impl WatchSession {
@@ -574,6 +580,7 @@ impl GuiApp {
         let Some(ws) = self.watch.as_ref() else { return };
         let rec = self.store.state.watch.entry(ws.drama.id.clone()).or_default();
         rec.last_ep = ws.ep;
+        rec.title = ws.drama.title.clone();
         rec.updated_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
@@ -594,6 +601,26 @@ impl GuiApp {
             || self.appended_next.as_ref().is_some_and(|(_, n)| *n == next)
             || self.append_in_flight == Some(next)
         {
+            return;
+        }
+        // 本地会话：下一集已下载就同步 append 本地文件（无网络）
+        if ws.is_local {
+            let Some(chapter) = ws.chapters.iter().find(|c| c.index == next).cloned() else {
+                return;
+            };
+            let item = crate::player::PlayItem {
+                url: chapter.video_id.clone(),
+                referer: String::new(),
+                key: None,
+                title: ws.ep_title_for(next),
+                start: 0,
+            };
+            if let Some(s) = self.player.as_ref() {
+                if s.append(&item).is_ok() {
+                    self.appended_next = Some((ws.drama.id.clone(), next));
+                    self.set_status(format!("已预载第{}集（本地），播完无缝接上", next));
+                }
+            }
             return;
         }
         // 章节来自看片会话——详情面板关着也能预载下一集
@@ -631,18 +658,32 @@ impl GuiApp {
     }
 
     /// 从底栏播放条发起播放（下一集/重播）——详情面板关着也能用。
+    /// 本地会话走本地文件，串流会话走取流。
     fn request_play_from_watch(&mut self, ep: usize) {
         let Some(ws) = self.watch.as_ref() else { return };
+        if ws.is_local {
+            let drama_id = ws.drama.id.clone();
+            self.play_local_episode(&drama_id, ep);
+            return;
+        }
         let drama = ws.drama.clone();
         let chapters = ws.chapters.clone();
         self.begin_play(&drama, &chapters, ep);
     }
 
-    /// 播放公共入口：记下看片会话（pending，PlayReady 落位）并起取流线程。
+    /// 播放公共入口（串流）：记下看片会话（pending，PlayReady 落位）并起取流线程。
+    /// 起播秒数在此查播放记录（精确续看），随回包落到 PlayItem。
     fn begin_play(&mut self, drama: &Drama, chapters: &[Chapter], ep: usize) {
         let Some(chapter) = chapters.iter().find(|c| c.index == ep).cloned() else {
             return;
         };
+        let start = self
+            .store
+            .state
+            .watch
+            .get(&drama.id)
+            .map(|r| r.resume_start(ep))
+            .unwrap_or(0);
         let series_id = drama.source_id.clone();
         let drama_id = drama.id.clone();
         let drama_title = drama.title.clone();
@@ -651,6 +692,7 @@ impl GuiApp {
             drama: drama.clone(),
             chapters: chapters.to_vec(),
             ep,
+            is_local: false,
         });
         let client = self.client.clone();
         let store = self.store.clone();
@@ -668,6 +710,7 @@ impl GuiApp {
                     url: resolved.url,
                     referer: resolved.referer,
                     key: resolved.cenc_key.map(hex::encode),
+                    start,
                     seq,
                 });
             }
@@ -675,6 +718,166 @@ impl GuiApp {
                 let _ = tx.send(Msg::Status(err));
             }
         });
+    }
+
+    /// 片库内建播放：本地已下载集直接起 mpv 会话（无取流），
+    /// 下一集/连播/底栏/精确续看与串流同一套体验。
+    fn play_local_episode(&mut self, drama_id: &str, ep: usize) {
+        let Some(entry) = self.store.library.get(drama_id) else { return };
+        let chapters = entry.local_chapters();
+        let Some(chapter) = chapters.iter().find(|c| c.index == ep).cloned() else {
+            self.set_status(format!("第{}集 未下载", ep));
+            return;
+        };
+        let start = self
+            .store
+            .state
+            .watch
+            .get(drama_id)
+            .map(|r| r.resume_start(ep))
+            .unwrap_or(0);
+        let drama = Drama {
+            id: drama_id.to_string(),
+            source: crate::model::SRC_HONGGUO.into(),
+            source_id: drama_id.split(':').nth(1).unwrap_or("").to_string(),
+            title: entry.title.clone(),
+            ..Default::default()
+        };
+        let ws = WatchSession { drama, chapters, ep, is_local: true };
+        let item = crate::player::PlayItem {
+            url: chapter.video_id.clone(),
+            referer: String::new(),
+            key: None,
+            title: ws.ep_title_for(ep),
+            start,
+        };
+        self.start_session_with_item(item, ws);
+    }
+
+    /// 把已就绪的 PlayItem 套到会话上（复用/重启 + 事件线程 + 位置取样线程），
+    /// 并落位看片会话（写播放记录、预载下一集）。串流（PlayReady）与
+    /// 本地（play_local_episode）共用同一条上台路径。
+    fn start_session_with_item(&mut self, item: crate::player::PlayItem, ws: WatchSession) {
+        // 单实例：会话还活着且 IPC 可达 → 直接换集（不闪新窗口）
+        let reuse = match self.player.as_mut() {
+            Some(s) => {
+                if s.process_alive() && s.ipc_ready() {
+                    s.load(&item).is_ok()
+                } else {
+                    false
+                }
+            }
+            None => false,
+        };
+        if reuse {
+            self.set_status(format!("▶ 正在播放：{}", item.title));
+        } else {
+            if let Some(mut old) = self.player.take() {
+                old.quit();
+            }
+            let (kind, program) = crate::player::resolve_player();
+            let ipc = crate::player::ipc_path();
+            let log_path = self.store.dir.join("mpv-last.log");
+            match crate::player::PlayerSession::launch(
+                kind,
+                &program,
+                &item,
+                &ipc,
+                &log_path,
+                true,
+                &self.store.state.player_prefs,
+            ) {
+                Ok(session) => {
+                    // 事件线程：end-file eof 驱动「连播/下一集」（idle 会话
+                    // 下 eof 照常发事件）；开播/播完各捕一次窗口与设定快照；
+                    // 停机旗随会话生灭（quit/drop 置 false，旧 reader 自退）。
+                    let running = session.running_flag();
+                    let tx_events = self.tx.clone();
+                    let ipc_for_reader = session.ipc.clone();
+                    let ipc_for_call = ipc_for_reader.clone();
+                    let pid = session.child_id();
+                    thread::spawn(move || {
+                        // 给播放器一点启动时间（event_loop 自带断线重连）。
+                        thread::sleep(std::time::Duration::from_millis(600));
+                        // snapshot 持有自己的 tx 克隆（避免借住 tx_events，
+                        // 挡住 event_loop 闭包的 move 捕获）。
+                        let tx_snap = tx_events.clone();
+                        let mut snapshot = move |ipc: &Path| {
+                            let tx2 = tx_snap.clone();
+                            let ipc2 = ipc.to_path_buf();
+                            thread::spawn(move || {
+                                let p =
+                                    crate::player::PlayerSession::capture_ipc_prefs(&ipc2, pid);
+                                let _ = tx2.send(Msg::PlayerPrefs(p));
+                            });
+                        };
+                        crate::player::event_loop(&ipc_for_call, &running, move |ev| {
+                            let msg = match ev {
+                                crate::player::PlayerEvent::Ended => {
+                                    snapshot(&ipc_for_reader);
+                                    Some(Msg::PlayerEnded { reason: "eof".into() })
+                                }
+                                crate::player::PlayerEvent::Failed(reason) => {
+                                    Some(Msg::PlayerEnded { reason })
+                                }
+                                crate::player::PlayerEvent::FileLoaded => {
+                                    snapshot(&ipc_for_reader);
+                                    Some(Msg::PlayerFileLoaded)
+                                }
+                                // 换集/启动类事件：GUI 不需要（标题等已随命令下发）
+                                crate::player::PlayerEvent::Replaced => None,
+                                crate::player::PlayerEvent::Started => None,
+                            };
+                            match msg {
+                                Some(m) => tx_events.send(m).is_ok(),
+                                None => true,
+                            }
+                        });
+                    });
+                    // 播放位置取样线程（每 5s 查 time-pos/duration）——
+                    // 精确续看的数据源；随会话停机旗生灭
+                    {
+                        let running_pos = session.running_flag();
+                        let tx_pos = self.tx.clone();
+                        let ipc_pos = session.ipc.clone();
+                        thread::spawn(move || {
+                            while running_pos.load(std::sync::atomic::Ordering::Relaxed) {
+                                thread::sleep(std::time::Duration::from_secs(5));
+                                if !running_pos.load(std::sync::atomic::Ordering::Relaxed) {
+                                    return;
+                                }
+                                let pos = crate::player::get_property_u64(&ipc_pos, "time-pos");
+                                let dur = crate::player::get_property_u64(&ipc_pos, "duration");
+                                let (Some(pos), Some(dur)) = (pos, dur) else {
+                                    continue;
+                                };
+                                if tx_pos.send(Msg::WatchPos { pos, dur }).is_err() {
+                                    return;
+                                }
+                            }
+                        });
+                    }
+                    self.player = Some(session);
+                    self.set_status(format!("▶ 正在播放：{}", item.title));
+                }
+                Err(e) => {
+                    let log_path = self.store.dir.join("mpv-last.log");
+                    let tail = crate::player::tail_lines(&log_path, 2);
+                    let hint = if tail.is_empty() {
+                        format!("（未安装？参考 README 安装 mpv，或设 GUO_MPV 指向可执行文件）")
+                    } else {
+                        format!("（日志尾行：{}）", tail)
+                    };
+                    self.set_status(format!("启动播放器失败：{} {}", e, hint));
+                }
+            }
+        }
+        if self.player.is_some() {
+            // 每部剧各自的播放记录（互不共用；标题供「继续观看」列）
+            self.watch = Some(ws);
+            self.note_watch_progress();
+            self.ensure_next_appended();
+        }
     }
 
     fn apply_msg(&mut self, ctx: &egui::Context, msg: Msg) {
@@ -783,7 +986,7 @@ impl GuiApp {
                     self.record_library_episode(&drama_id, ep, &file, kind, quality, &dir);
                 }
             }
-            Msg::PlayReady { drama_id, drama_title, ep, total, url, referer, key, seq } => {
+            Msg::PlayReady { drama_id, drama_title, ep, total, url, referer, key, start, seq } => {
                 // 过期回包丢弃：用户连点两集/连播与手动点击并发时，只有最后
                 // 一次请求的 resolve 结果允许上台（后完成抢播 = 播错集）。
                 if seq != self.play_seq {
@@ -795,121 +998,18 @@ impl GuiApp {
                     referer,
                     key,
                     title: format!("《{}》第{}集", drama_title, ep),
+                    start,
                 };
-                // 手动换集：清掉播放列表里预载的旧「下一集」（防止播完错接），
-                // 并复位预载状态——新的下一集由本集开播后重新预载。
-                self.appended_next = None;
-                let _ = self.player.as_mut().map(|s| s.playlist_clear());
-                // 单实例：会话还活着且 IPC 可达 → 直接换集（不闪新窗口）。
-                let reuse = match self.player.as_mut() {
-                    Some(s) => {
-                        if s.process_alive() && s.ipc_ready() {
-                            s.load(&item).is_ok()
-                        } else {
-                            false
-                        }
-                    }
-                    None => false,
+                // pending 会话落位核对：过期回包（连点换集）只报状态不上台
+                let Some(ws) = self
+                    .pending_watch
+                    .take()
+                    .filter(|w| w.drama.id == drama_id && w.ep == ep)
+                else {
+                    self.set_status(format!("▶ 正在播放：{}", drama_title));
+                    return;
                 };
-                if reuse {
-                    self.set_status(format!("▶ 正在播放：{}", item.title));
-                } else {
-                    if let Some(mut old) = self.player.take() {
-                        old.quit();
-                    }
-                    let (kind, program) = crate::player::resolve_player();
-                    let ipc = crate::player::ipc_path();
-                    let log_path = self.store.dir.join("mpv-last.log");
-                    match crate::player::PlayerSession::launch(
-                        kind,
-                        &program,
-                        &item,
-                        &ipc,
-                        &log_path,
-                        true,
-                        &self.store.state.player_prefs,
-                    ) {
-                        Ok(session) => {
-                            // 事件线程：end-file eof 驱动「连播/下一集」（idle 会话
-                            // 下 eof 照常发事件）；开播/播完各捕一次窗口与设定快照；
-                            // 停机旗随会话生灭（quit/drop 置 false，旧 reader 自退）。
-                            let running = session.running_flag();
-                            let tx_events = self.tx.clone();
-                            let ipc_for_reader = session.ipc.clone();
-                            let ipc_for_call = ipc_for_reader.clone();
-                            let pid = session.child_id();
-                            thread::spawn(move || {
-                                // 给播放器一点启动时间（event_loop 自带断线重连）。
-                                thread::sleep(std::time::Duration::from_millis(600));
-                                // snapshot 持有自己的 tx 克隆（避免借住 tx_events，
-                                // 挡住 event_loop 闭包的 move 捕获）。
-                                let tx_snap = tx_events.clone();
-                                let mut snapshot = move |ipc: &Path| {
-                                    let tx2 = tx_snap.clone();
-                                    let ipc2 = ipc.to_path_buf();
-                                    thread::spawn(move || {
-                                        let p =
-                                            crate::player::PlayerSession::capture_ipc_prefs(&ipc2, pid);
-                                        let _ = tx2.send(Msg::PlayerPrefs(p));
-                                    });
-                                };
-                                crate::player::event_loop(&ipc_for_call, &running, move |ev| {
-                                    let msg = match ev {
-                                        crate::player::PlayerEvent::Ended => {
-                                            snapshot(&ipc_for_reader);
-                                            Some(Msg::PlayerEnded { reason: "eof".into() })
-                                        }
-                                        crate::player::PlayerEvent::Failed(reason) => {
-                                            Some(Msg::PlayerEnded { reason })
-                                        }
-                                        crate::player::PlayerEvent::FileLoaded => {
-                                            snapshot(&ipc_for_reader);
-                                            Some(Msg::PlayerFileLoaded)
-                                        }
-                                        // 换集/启动类事件：GUI 不需要（标题等已随命令下发）
-                                        crate::player::PlayerEvent::Replaced => None,
-                                        crate::player::PlayerEvent::Started => None,
-                                    };
-                                    match msg {
-                                        Some(m) => tx_events.send(m).is_ok(),
-                                        None => true,
-                                    }
-                                });
-                            });
-                            self.player = Some(session);
-                            self.set_status(format!("▶ 正在播放：{}", item.title));
-                        }
-                        Err(e) => {
-                            let log_path = self.store.dir.join("mpv-last.log");
-                            let tail = crate::player::tail_lines(&log_path, 2);
-                            let hint = if tail.is_empty() {
-                                format!("（未安装？参考 README 安装 mpv，或设 GUO_MPV 指向可执行文件）")
-                            } else {
-                                format!("（日志尾行：{}）", tail)
-                            };
-                            self.set_status(format!("启动播放器失败：{} {}", e, hint));
-                        }
-                    }
-                }
-                if self.player.is_some() {
-                    // pending 会话落位（drama_id 防御性核对）
-                    let ws = self
-                        .pending_watch
-                        .take()
-                        .filter(|w| w.drama.id == drama_id && w.ep == ep);
-                    if let Some(mut ws) = ws {
-                        ws.ep = ep;
-                        self.watch = Some(ws);
-                        self.note_watch_progress();
-                        self.ensure_next_appended();
-                    } else {
-                        self.set_status(format!("▶ 正在播放：{}", drama_title));
-                    }
-                }
-            }
-            Msg::PlayerFileLoaded => {
-                // 每个文件真正载入（含连播自动切换的下一集）后确保再下一集已预载
-                self.ensure_next_appended();
+                self.start_session_with_item(item, ws);
             }
             Msg::AppendReady { drama_id, ep, url, referer, key } => {
                 // 竞态修复：只有「自己发起的那次解析」回来才清 in-flight——
@@ -939,6 +1039,7 @@ impl GuiApp {
                     referer,
                     key,
                     title: ws.ep_title_for(ep),
+                    start: 0,
                 };
                 if s.append(&item).is_ok() {
                     self.appended_next = Some((drama_id, ep));
@@ -1001,6 +1102,20 @@ impl GuiApp {
                     self.set_status(label);
                 } else if reason != "stop" && reason != "quit" && reason != "redirect" {
                     self.set_status(format!("播放中断：{}（可重试同一集；日志见数据目录 mpv-last.log）", reason));
+                }
+            }
+            Msg::PlayerFileLoaded => {
+                // 每个文件真正载入（含连播自动切换的下一集）后确保再下一集已预载
+                self.ensure_next_appended();
+            }
+            Msg::WatchPos { pos, dur } => {
+                // 集内位置取样落进该剧的播放记录（精确续看数据源）
+                if let Some(ws) = self.watch.as_ref() {
+                    let rec = self.store.state.watch.entry(ws.drama.id.clone()).or_default();
+                    rec.pos_ep = ws.ep;
+                    rec.pos = pos;
+                    rec.dur = dur;
+                    let _ = self.store.save();
                 }
             }
             Msg::PlayerPrefs(prefs) => {
@@ -1379,10 +1494,12 @@ impl GuiApp {
         } = self;
         let sort = *catalog_sort;
         let watched_ids: HashSet<String> = self.store.state.watch.keys().cloned().collect();
+        let continue_list = crate::state::continue_watching(&self.store.state.watch, 10);
         let mut open: Option<CardAction> = None;
         let mut more: Option<String> = None;
         let mut refresh = false;
         let mut switch_sort: Option<CatalogSort> = None;
+        let mut continue_ep: Option<(String, usize)> = None;
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label("排序：");
@@ -1405,7 +1522,21 @@ impl GuiApp {
                     refresh = true;
                 }
             });
-            ui.separator();
+            // 「继续观看」置顶列（Netflix/YouTube 惯例）：最近看的剧一键续看
+            if !continue_list.is_empty() {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("继续观看：");
+                    for (id, title, ep) in &continue_list {
+                        if ui
+                            .small_button(format!("《{}》续看第{}集", title, ep))
+                            .clicked()
+                        {
+                            continue_ep = Some((id.clone(), *ep));
+                        }
+                    }
+                });
+                ui.separator();
+            }
             egui::ScrollArea::vertical().id_salt("catalog_scroll").show(ui, |ui| {
                 for genre in GENRES.iter() {
                     let Some(dramas) = catalog.get(&cat_key(genre.key, sort)) else { continue };
@@ -1456,6 +1587,23 @@ impl GuiApp {
                 });
             });
         });
+        if let Some((drama_id, ep)) = continue_ep {
+            // 续看列：只有 id/标题（无封面详情）——构造最小 Drama 开详情并自动开播
+            let drama = Drama {
+                id: drama_id.clone(),
+                source: crate::model::SRC_HONGGUO.into(),
+                source_id: drama_id.split(':').nth(1).unwrap_or("").to_string(),
+                title: self
+                    .store
+                    .state
+                    .watch
+                    .get(&drama_id)
+                    .map(|r| r.title.clone())
+                    .unwrap_or_default(),
+                ..Default::default()
+            };
+            self.open_detail(&drama, Some(ep));
+        }
         if let Some(sort) = switch_sort {
             self.set_catalog_sort(sort);
         }
@@ -1543,7 +1691,14 @@ impl GuiApp {
     }
 
     fn show_library(&mut self, ctx: &egui::Context) {
+        let mut play_local: Option<(String, usize)> = None;
+        let mut clear_watch = false;
         egui::CentralPanel::default().show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.small_button("清空播放记录").clicked() {
+                    clear_watch = true;
+                }
+            });
             if !self.downloads.is_empty() {
                 ui.heading("本次会话下载");
                 egui::ScrollArea::vertical().id_salt("downloads_scroll")
@@ -1604,18 +1759,28 @@ impl GuiApp {
                             let path = PathBuf::from(&entry.dir)
                                 .join(format!("ep_{:03}", ep.index))
                                 .join(&ep.file);
+                            // ▶=内建播放器（续看/连播/底栏同一套体验）；
+                            // 系统播放器走「打开目录」自取
                             if ui
                                 .small_button(format!("▶{}", ep.index))
-                                .on_hover_text(path.display().to_string())
+                                .on_hover_text(format!("内建播放：{}", path.display()))
                                 .clicked()
                             {
-                                open_in_system(&path);
+                                play_local = Some((entry.drama_id.clone(), ep.index));
                             }
                         }
                     });
                 }
             });
         });
+        if clear_watch {
+            self.store.state.watch.clear();
+            let _ = self.store.save();
+            self.set_status("播放记录已清空");
+        }
+        if let Some((drama_id, ep)) = play_local {
+            self.play_local_episode(&drama_id, ep);
+        }
     }
 
     fn show_detail(&mut self, ui: &mut egui::Ui) -> bool {
@@ -1749,8 +1914,21 @@ impl GuiApp {
                         });
                     } else {
                         let last = watch_last.min(chapters.len());
+                        // 精确续看：有集内位置 → 标注「从 mm:ss」（start 由 begin_play 查记录下发）
+                        let resume = self
+                            .store
+                            .state
+                            .watch
+                            .get(&drama.id)
+                            .map(|r| r.resume_start(last))
+                            .unwrap_or(0);
                         let (hero_label, hero_ep) = if last > 0 {
-                            (format!("▶  续看第{}集", last), last)
+                            let label = if resume > 0 {
+                                format!("▶  续看第{}集（从 {}）", last, crate::state::mmss(resume))
+                            } else {
+                                format!("▶  续看第{}集", last)
+                            };
+                            (label, last)
                         } else {
                             ("▶  播放第 1 集".to_string(), 1)
                         };
