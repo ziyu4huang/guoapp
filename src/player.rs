@@ -192,7 +192,7 @@ pub fn session_option_args(kind: PlayerKind, keepalive: bool) -> Vec<String> {
     let mut args = vec![
         format!("{}=auto", kind.opt("hwdec")),
         format!("{}=yes", kind.opt("cache")),
-        format!("{}=3", kind.opt("cache-pause-wait")),
+        format!("{}=2", kind.opt("cache-pause-wait")),
         // cache-pause-initial 是布尔开关，`--x=yes` 与 `--x` 等价，统一带 =yes 便于断言
         format!("{}=yes", kind.opt("cache-pause-initial")),
         format!("{}=60", kind.opt("demuxer-readahead-secs")),
@@ -840,7 +840,7 @@ mod tests {
             // 缓冲三件套：起播缓冲 + 预读上限 + 断线重连/超时
             assert!(has(&format!("{}=yes", kind.opt("cache"))), "{args:?}");
             assert!(has(&format!("{}=yes", kind.opt("cache-pause-initial"))), "{args:?}");
-            assert!(has(&format!("{}=3", kind.opt("cache-pause-wait"))), "{args:?}");
+            assert!(has(&format!("{}=2", kind.opt("cache-pause-wait"))), "{args:?}");
             assert!(has(&format!("{}=60", kind.opt("demuxer-readahead-secs"))), "{args:?}");
             assert!(has(&format!("{}=128MiB", kind.opt("demuxer-max-bytes"))), "{args:?}");
             assert!(has(&format!("{}=reconnect=1", kind.opt("stream-lavf-o"))), "{args:?}");

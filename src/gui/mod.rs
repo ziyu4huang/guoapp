@@ -29,9 +29,13 @@ struct CoverCache {
     map: HashMap<String, Option<egui::TextureHandle>>,
     pending: HashSet<String>,
     queue_tx: mpsc::Sender<String>,
+    /// 插入序（FIFO 逐出用）：texture 只进不出会线性吃 GPU/内存
+    order: std::collections::VecDeque<String>,
 }
 
 const COVER_WORKERS: usize = 4;
+/// 封面纹理上限（张）——超出逐出最旧（handle drop 即释放显存）
+const COVER_CAP: usize = 300;
 
 impl CoverCache {
     fn new(msg_tx: mpsc::Sender<Msg>) -> Self {
@@ -47,7 +51,12 @@ impl CoverCache {
                 let _ = msg_tx.send(Msg::Cover { url, rgba });
             });
         }
-        CoverCache { map: HashMap::new(), pending: HashSet::new(), queue_tx }
+        CoverCache {
+            map: HashMap::new(),
+            pending: HashSet::new(),
+            queue_tx,
+            order: std::collections::VecDeque::new(),
+        }
     }
 
     /// 命中缓存返回纹理；未命中入队抓取并返回 None（卡片画「…」占位）。
@@ -71,12 +80,23 @@ impl CoverCache {
             let image = egui::ColorImage::from_rgba_unmultiplied([w, h], &bytes);
             Some(ctx.load_texture("cover", image, Default::default()))
         });
+        // FIFO 逐出：纹理只进不出=显存/内存线性涨（长会话刷多页实测路径）
+        if !self.order.contains(&url) {
+            self.order.push_back(url.clone());
+        }
+        while self.map.len() >= COVER_CAP {
+            let Some(oldest) = self.order.pop_front() else { break };
+            if self.map.remove(&oldest).is_some() {
+                break;
+            }
+        }
         self.map.insert(url, handle);
     }
 
     fn clear(&mut self) {
         self.map.clear();
         self.pending.clear();
+        self.order.clear();
     }
 }
 
@@ -199,6 +219,8 @@ enum DetailMode {
 
 struct DownloadJob {
     store: Store,
+    /// 共享 HTTP 客戶端（連線池/TLS session 跨集復用；舊代碼每集重建=白扔握手）
+    client: Arc<HgClient>,
     drama_id: String,
     series_id: String,
     chapters: Vec<Chapter>,
@@ -522,6 +544,7 @@ impl GuiApp {
             });
             let _ = self.job_tx.send(DownloadJob {
                 store: self.store.clone(),
+                client: self.client.clone(),
                 drama_id: drama_id.clone(),
                 series_id: series_id.clone(),
                 chapters: chapters.clone(),
@@ -1055,7 +1078,7 @@ fn run_download_job(job: DownloadJob, tx: mpsc::Sender<Msg>) {
             return;
         }
     };
-    let client = HgClient::new();
+    let client = job.client;
     let resolved = match media::try_resolve_media(&client, &job.store, &job.series_id, &chapter.video_id)
     {
         Ok(m) => m,
@@ -1074,6 +1097,9 @@ fn run_download_job(job: DownloadJob, tx: mpsc::Sender<Msg>) {
     let tx_progress = tx.clone();
     let drama_id = job.drama_id.clone();
     let ep = job.ep;
+    // 进度节流：≥100ms 才发一条（10Hz 足够进度条），终值 1.0 必发。
+    // 旧代码每 chunk 一条——mpsc 洪水拖累 UI 重绘频率。
+    let mut last_sent = std::time::Instant::now() - std::time::Duration::from_secs(1);
     let result = media::download_episode_progress(
         &client,
         &resolved,
@@ -1081,6 +1107,11 @@ fn run_download_job(job: DownloadJob, tx: mpsc::Sender<Msg>) {
         job.quality,
         &format!("第{}集", job.ep),
         &mut move |frac| {
+            let done = frac >= 1.0;
+            if !done && last_sent.elapsed() < std::time::Duration::from_millis(100) {
+                return;
+            }
+            last_sent = std::time::Instant::now();
             let _ = tx_progress.send(Msg::DownloadProgress {
                 drama_id: drama_id.clone(),
                 ep,

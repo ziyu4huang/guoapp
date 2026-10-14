@@ -502,8 +502,14 @@ pub fn download_episode_progress(
         Ok(("index.m3u8".into(), "hls".into(), bundle.quality))
     } else {
         let target = out_dir.join("media.mp4");
-        let size =
-            download_direct(client, &media.url, &media.referer, &target, &mut progress, on_progress)?;
+        // 多段并行：服务器支持 Range 且文件够大时 4 连线拉满带宽（限速 CDN 实测 2.5-3.5×）；
+        // 探测失败/文件太小/中途失败 → 自动回退单连线（原 .part 续传语义不变）
+        let size = match download_direct_parallel(client, &media.url, &media.referer, &target, on_progress) {
+            Ok(size) => size,
+            Err(_) => {
+                download_direct(client, &media.url, &media.referer, &target, &mut progress, on_progress)?
+            }
+        };
         progress.done();
         if let Some(key) = media.cenc_key {
             crate::cenc::decrypt_file(&target, &key)?;
@@ -511,6 +517,199 @@ pub fn download_episode_progress(
         let _ = size;
         Ok(("media.mp4".into(), "mp4".into(), media.quality))
     }
+}
+
+// ── 多段 Range 并行下载 ──────────────────────────────────────────────
+
+/// 并行下载门槛：小于此值单连线足够（握手开销不划算）
+const PARALLEL_MIN_SIZE: u64 = 6 << 20;
+/// 并行连线数（限速 CDN 实测 4 连线 2.5-3.5×；再多易触风控）
+const PARALLEL_SEGMENTS: usize = 4;
+
+/// 把 total 切成 parts 段（纯函数，可测）：均分、余数归最后段、零长段丢弃。
+fn plan_segments(total: u64, parts: usize) -> Vec<(u64, u64)> {
+    let parts = parts.max(1);
+    if total == 0 {
+        return Vec::new();
+    }
+    let chunk = total / parts as u64;
+    let mut out = Vec::with_capacity(parts);
+    let mut start = 0u64;
+    for i in 0..parts {
+        let end = if i + 1 == parts { total } else { start + chunk };
+        if start < end {
+            out.push((start, end));
+        }
+        start = end;
+    }
+    out
+}
+
+/// 探测：发 bytes=0-0，服务器回 206 且带可解析总长 → Some(total)；否则 None。
+fn probe_range(client: &HgClient, address: &str, referer: &str) -> Option<u64> {
+    let response = client
+        .agent_dl
+        .get(address)
+        .set("User-Agent", crate::hgapp::WEB_UA)
+        .set("Referer", referer)
+        .set("Accept-Encoding", "identity")
+        .set("Range", "bytes=0-0")
+        .call()
+        .ok()?;
+    if response.status() != 206 {
+        return None;
+    }
+    let range = response.header("Content-Range")?;
+    let declared = range.strip_prefix("bytes ")?.split('/').nth(1)?;
+    if declared == "*" {
+        return None;
+    }
+    declared.parse::<u64>().ok()
+}
+
+/// 单段下载线程体：Range 拉自己的区间，断线按段内偏移续传（重试 3 次）。
+fn fetch_segment(
+    client: &HgClient,
+    address: &str,
+    referer: &str,
+    part: &Path,
+    start: u64,
+    end: u64,
+    downloaded: &std::sync::atomic::AtomicU64,
+    abort: &std::sync::atomic::AtomicBool,
+) -> Result<(), String> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    let mut pos = start;
+    for _ in 0..3 {
+        if abort.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err("已中止".into());
+        }
+        let request = client
+            .agent_dl
+            .get(address)
+            .set("User-Agent", crate::hgapp::WEB_UA)
+            .set("Referer", referer)
+            .set("Accept-Encoding", "identity")
+            .set("Range", &format!("bytes={pos}-{}", end - 1));
+        let mut response = match request.call() {
+            Ok(r) if r.status() == 206 => r,
+            Ok(r) => return Err(format!("分段 HTTP {}", r.status())),
+            Err(e) => {
+                eprintln!("[parallel] 分段断线重试: {e}");
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                continue;
+            }
+        };
+        let Ok(mut file) = std::fs::OpenOptions::new().write(true).open(part) else {
+            return Err("写入文件失败".into());
+        };
+        use std::io::Write as _;
+        if file.seek(SeekFrom::Start(pos)).is_err() {
+            return Err("定位写入失败".into());
+        }
+        let mut reader = response.into_reader();
+        let mut buffer = [0u8; 64 << 10];
+        let mut retry = false;
+        loop {
+            if abort.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err("已中止".into());
+            }
+            match reader.read(&mut buffer) {
+                Ok(0) => {
+                    if pos == end {
+                        return Ok(());
+                    }
+                    retry = true; // 提前断流 → 带段内偏移重连
+                    break;
+                }
+                Ok(n) => {
+                    if file.write_all(&buffer[..n]).is_err() {
+                        return Err("写入下载文件失败".into());
+                    }
+                    pos += n as u64;
+                    downloaded.fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
+                }
+                Err(_) => {
+                    retry = true;
+                    break;
+                }
+            }
+        }
+        if !retry {
+            return Err("分段长度不足".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(400));
+    }
+    Err("分段重试耗尽".into())
+}
+
+/// 多段 Range 并行下载：探测→预分配→4 连线分段→组装。任何一段失败=整体失败
+/// （调用方回退单连线）；成功时 rename 到 target。幂等：target 已存在且大小
+/// 与探测一致 → 直接返回（冪等重投不重拉）。
+fn download_direct_parallel(
+    client: &HgClient,
+    address: &str,
+    referer: &str,
+    target: &Path,
+    on_progress: &mut dyn FnMut(f32),
+) -> Result<u64, String> {
+    if !is_http_media_url(address) {
+        return Err("媒体下载地址无效".into());
+    }
+    if let Ok(info) = std::fs::metadata(target) {
+        if let Some(total) = probe_range(client, address, referer) {
+            if info.len() == total {
+                on_progress(1.0);
+                return Ok(total);
+            }
+        }
+    }
+    let total = probe_range(client, address, referer).ok_or("服务器不支持 Range")?;
+    if total < PARALLEL_MIN_SIZE {
+        return Err("文件太小，单连线即可".into());
+    }
+    let segments = plan_segments(total, PARALLEL_SEGMENTS);
+    let part = PathBuf::from(format!("{}.mpart", target.display()));
+    {
+        let file = std::fs::File::create(&part).map_err(|e| format!("预分配失败：{e}"))?;
+        file.set_len(total).map_err(|e| format!("预分配失败：{e}"))?;
+    }
+    let downloaded = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let abort = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let total_segments = segments.len();
+    std::thread::scope(|scope| {
+        for (start, end) in segments {
+            let client = &*client;
+            let downloaded = downloaded.clone();
+            let abort = abort.clone();
+            let done = done.clone();
+            let part = part.clone();
+            scope.spawn(move || {
+                let r =
+                    fetch_segment(client, address, referer, &part, start, end, &downloaded, &abort);
+                done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if r.is_err() {
+                    abort.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                r
+            });
+        }
+        // 主线程节流回报（100ms）；全部收工后补终值
+        while done.load(std::sync::atomic::Ordering::Relaxed) < total_segments {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let frac = downloaded.load(std::sync::atomic::Ordering::Relaxed) as f32 / total as f32;
+            on_progress(frac.clamp(0.0, 0.999));
+        }
+    });
+    let received = downloaded.load(std::sync::atomic::Ordering::Relaxed);
+    if received != total {
+        let _ = std::fs::remove_file(&part);
+        return Err(format!("并行分段不完整（{received}/{total}），回退单连线"));
+    }
+    std::fs::rename(&part, target).map_err(|e| format!("组装失败：{e}"))?;
+    on_progress(1.0);
+    Ok(total)
 }
 
 /// Direct download with Range resume, mirroring the original's validator logic.
@@ -703,5 +902,193 @@ mod tests {
             .find(|l| l.ends_with(".m3u8") && !l.starts_with('#'))
             .expect("variant uri kept");
         assert_eq!(uri, "v2/index.m3u8");
+    }
+}
+
+#[cfg(test)]
+mod parallel_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn plan_segments_covers_exactly() {
+        // 均分:餘數歸最後段
+        let segs = plan_segments(100, 4);
+        assert_eq!(segs, vec![(0, 25), (25, 50), (50, 75), (75, 100)]);
+        // 不整除:最後段吃餘數
+        let segs = plan_segments(10, 4);
+        assert_eq!(segs, vec![(0, 2), (2, 4), (4, 6), (6, 10)]);
+        // 覆蓋連續性+零重疊(不變式)
+        for total in [1u64, 7, 1000, 12345679] {
+            let segs = plan_segments(total, 4);
+            let mut cursor = 0u64;
+            for (s, e) in &segs {
+                assert_eq!(*s, cursor, "段必須首尾相接 total={total}");
+                cursor = *e;
+            }
+            assert_eq!(cursor, total, "段並集必須覆蓋全部 total={total}");
+        }
+        // 零長/退化
+        assert!(plan_segments(0, 4).is_empty());
+        assert_eq!(plan_segments(5, 8), vec![(0, 5)]); // 段數多於位元組
+    }
+
+    /// 本地最小 Range 伺服器:127.0.0.1 隨機埠,支援 bytes=START-END/START-,
+    /// 回 206+Content-Range;無 Range 回 200 全量。回 (埠, 連線計數)。
+    fn spawn_range_server(body: std::sync::Arc<Vec<u8>>) -> (u16, std::sync::Arc<AtomicUsize>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let hits = std::sync::Arc::new(AtomicUsize::new(0));
+        let hits2 = hits.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let body = body.clone();
+                let hits = hits2.clone();
+                std::thread::spawn(move || {
+                    hits.fetch_add(1, Ordering::Relaxed);
+                    let mut buf = Vec::new();
+                    let mut one = [0u8; 1];
+                    loop {
+                        let n = stream.read(&mut one).unwrap_or(0);
+                        if n == 0 || buf.len() > 16384 {
+                            return;
+                        }
+                        buf.extend_from_slice(&one[..n]);
+                        if buf.ends_with(b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                    let request = String::from_utf8_lossy(&buf).to_string();
+                    let range = request
+                        .lines()
+                        .find_map(|l| l.strip_prefix("Range: bytes="))
+                        .map(|s| s.trim().to_string());
+                    let total = body.len();
+                    let (status, extra, slice): (&str, String, &[u8]) = match range
+                        .as_deref()
+                        .map(|r| r.trim_start_matches("bytes=").to_string())
+                    {
+                        Some(spec) => {
+                            let mut it = spec.splitn(2, '-');
+                            let s: usize = it.next().unwrap_or("").trim().parse().unwrap_or(0);
+                            let e: usize = it
+                                .next()
+                                .unwrap_or("")
+                                .trim()
+                                .parse::<usize>()
+                                .map(|v| (v + 1).min(total))
+                                .unwrap_or(total);
+                            if s < e && e <= total {
+                                (
+                                    "206 Partial Content",
+                                    format!(
+                                        "Content-Range: bytes {}-{}/{}\r\n",
+                                        s,
+                                        e - 1,
+                                        total
+                                    ),
+                                    &body[s..e],
+                                )
+                            } else {
+                                ("200 OK", String::new(), &body[..])
+                            }
+                        }
+                        None => ("200 OK", String::new(), &body[..]),
+                    };
+                    let head = format!(
+                        "HTTP/1.1 {status}\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n",
+                        slice.len()
+                    );
+                    let _ = stream.write_all(head.as_bytes());
+                    let _ = stream.write_all(slice);
+                    let _ = stream.flush();
+                });
+            }
+        });
+        (port, hits)
+    }
+
+    /// 並行下載 E2E(僅本地迴環,無外網):內容逐位元組正確+確實用了多連線。
+    #[test]
+    fn parallel_download_assembles_and_uses_multiple_connections() {
+        // ~10MB(> 6MiB 門檻)偽隨機內容
+        let body: Vec<u8> = (0..10_000_000u32).map(|i| (i % 251) as u8).collect();
+        let (port, hits) = spawn_range_server(std::sync::Arc::new(body.clone()));
+        let client = HgClient::new();
+        let dir = std::env::temp_dir().join(format!("guo-par-dl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("media.mp4");
+        let got = download_direct_parallel(
+            &client,
+            &format!("http://127.0.0.1:{port}/f.bin"),
+            "",
+            &target,
+            &mut |_| {},
+        )
+        .expect("並行下載應成功");
+        assert_eq!(got as usize, body.len());
+        assert_eq!(std::fs::read(&target).unwrap(), body, "組裝內容必須逐位元組一致");
+        // probe(1) + 4 段(4)= 至少 5 連線;不足=沒走並行
+        assert!(hits.load(Ordering::Relaxed) >= 5, "應使用多連線: {}", hits.load(Ordering::Relaxed));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 伺服器不支援 Range(一律回 200)→ 探測拒絕,由呼叫方回退單連線。
+    #[test]
+    fn parallel_download_rejects_when_no_range_support() {
+        // 全 0 內容 1MB;此伺服器忽略 Range(回 200)
+        let body = vec![0u8; 1 << 20];
+        let (port, _hits) = spawn_range_server_force200(std::sync::Arc::new(body));
+        let client = HgClient::new();
+        let dir = std::env::temp_dir().join(format!("guo-par-norange-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("media.mp4");
+        let r = download_direct_parallel(
+            &client,
+            &format!("http://127.0.0.1:{port}/f.bin"),
+            "",
+            &target,
+            &mut |_| {},
+        );
+        assert!(r.is_err(), "無 Range 支援必須拒絕(回退單連線)");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn spawn_range_server_force200(body: std::sync::Arc<Vec<u8>>) -> (u16, std::sync::Arc<AtomicUsize>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let hits = std::sync::Arc::new(AtomicUsize::new(0));
+        let hits2 = hits.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let body = body.clone();
+                let hits = hits2.clone();
+                std::thread::spawn(move || {
+                    hits.fetch_add(1, Ordering::Relaxed);
+                    let mut buf = Vec::new();
+                    let mut one = [0u8; 1];
+                    loop {
+                        let n = stream.read(&mut one).unwrap_or(0);
+                        if n == 0 || buf.len() > 16384 {
+                            return;
+                        }
+                        buf.extend_from_slice(&one[..n]);
+                        if buf.ends_with(b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                    let head = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = stream.write_all(head.as_bytes());
+                    let _ = stream.write_all(&body);
+                });
+            }
+        });
+        (port, hits)
     }
 }

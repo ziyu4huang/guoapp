@@ -74,6 +74,10 @@ cargo run --release --bin guo-gui     # 或直接运行 target/release/guo-gui
   观看数、hot_score=平台热度榜、online_time=最新）——GUI 排序列+CLI
   `--sort`；同一排序两次请求顺序会漂（API 掺推荐），客户端按观看数稳定排序；
   网页回退通道不支持排序（保持原序）
+- **性能（v0.4.1）**：mimalloc 分配器（egui 官方实测 ~20%）；下载
+  4 连线 Range 并行（限速 CDN 实测 2.5-3.5×，不支持 Range 自动回退单线）；
+  HTTP 连接池跨集复用 + 读超时（僵死连接 60s 自断）；封面纹理 LRU 上限；
+  进度回调节流 10Hz；起播缓冲 3s→2s
 - **无缝连播（v0.3.4）**：播放当前集时后台解析下一集并预载进播放器播放
   列表（`--prefetch-playlist` 提前缓冲）——播完瞬间 mpv 内部直接切换，
   无黑屏等待，像本地连播一样连续

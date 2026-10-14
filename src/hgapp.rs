@@ -42,11 +42,16 @@ impl Default for HgClient {
 impl HgClient {
     pub fn new() -> HgClient {
         HgClient {
+            // API agent:總超時 20s——目錄/取流請求不該久等，僵死即報錯換路徑
+            // 下載 agent:讀超時 60s（兩字節之間的最大間隔）——無總超時（大檔），
+            // 但僵死連線 60s 必斷，不再永久佔住 worker（舊代碼只有連線超時實錄）
             agent: ureq::AgentBuilder::new()
                 .timeout_connect(Duration::from_secs(10))
+                .timeout(Duration::from_secs(20))
                 .build(),
             agent_dl: ureq::AgentBuilder::new()
                 .timeout_connect(Duration::from_secs(15))
+                .timeout_read(Duration::from_secs(60))
                 .build(),
         }
     }

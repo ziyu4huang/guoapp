@@ -7,6 +7,10 @@ use guo::state::{EpisodeEntry, LibraryEntry, Store};
 use std::collections::BTreeMap;
 use std::io::Write as _;
 
+/// mimalloc 全域分配器:egui 官方文檔實測即時模式 UI ~20% 提速
+#[global_allocator]
+static GLOBAL_ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 const USAGE: &str = "\
 guo — 红果短剧命令行工具（guoapp 的 Rust 重写核心）
 
