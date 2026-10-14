@@ -206,12 +206,17 @@ fn gui_full_flow() {
         .get_by_role_and_label(accesskit::Role::Button, &shortest_title)
         .click();
     pump_until(&mut harness, 40, |h| {
-        h.query_by_label_contains("全部下载").is_some()
+        h.query_by_label_contains("点击集数即播放").is_some()
     });
     save_png(&mut harness, "guo-kit-detail.png");
 
     // 4. 只保留第 1 集选中：取消其余集数（详情默认全选）
-    eprintln!("选中剧：{}，全不选后右键勾选第 1 集（左键=播放）", shortest_title);
+    eprintln!(
+        "选中剧：{}，切「⬇ 下载」模式→全不选→右键勾选第 1 集",
+        shortest_title
+    );
+    harness.run_steps(2);
+    harness.get_by_label_contains("⬇ 下载").click();
     harness.run_steps(2);
     harness.get_by_label("全不选").click();
     harness.run_steps(2);
@@ -276,7 +281,7 @@ fn episode_cell_semantics() {
         h.query_by_label_contains("点击集数即播放").is_some()
     });
 
-    // A. 左键点集格 1 = 播放该集（不是勾选下载）
+    // A. 看片模式：左键点集格 1 = 播放该集（不是勾选下载）
     harness
         .get_by_role_and_label(accesskit::Role::Button, "1")
         .click();
@@ -285,7 +290,9 @@ fn episode_cell_semantics() {
     });
     eprintln!("✓ 左键点集数格 = 直接播放该集");
 
-    // B. 右键点集格 2 = 勾选下载（先全不选，计数应为 1）
+    // B. 切「⬇ 下载」模式：勾选才回来（与看片分家）
+    harness.get_by_label_contains("⬇ 下载").click();
+    harness.run_steps(2);
     harness.get_by_label("全不选").click();
     harness.run_steps(2);
     right_click(&mut harness, "2");
@@ -293,4 +300,65 @@ fn episode_cell_semantics() {
         h.query_by_label_contains("下载选中（1）").is_some()
     });
     eprintln!("✓ 右键点集数格 = 勾选/取消下载");
+}
+
+/// WatchSession 解耦验收：播放中关掉详情面板，底栏播放条仍有「下一集」
+/// 且能真正推进到第 2 集（旧架构下 request_play 依赖 detail，关闭即断链）。
+#[test]
+#[ignore]
+fn watch_survives_detail_close() {
+    std::env::set_var("GUO_MPV_ARGS", "--vo=null --ao=null");
+    std::env::set_var("GUOAPP_DATA", temp_data_dir());
+    let mut harness: H = Harness::builder()
+        .with_size(egui::vec2(1180.0, 760.0))
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| guo::gui::GuiApp::new(cc));
+
+    pump_until(&mut harness, 60, |h| {
+        h.query_all_by_label_contains("共").count() >= 20
+    });
+    const FIXED: [&str; 3] = ["清空封面缓存", "刷新", "搜索"];
+    let title = harness
+        .query_all_by(|node| {
+            node.role() == accesskit::Role::Button && node.toggled().is_none()
+        })
+        .filter_map(|node| node.label().map(|l| l.to_string()))
+        .find(|label| {
+            !FIXED.contains(&label.as_str())
+                && !label.starts_with("更多")
+                && !label.starts_with("真人剧")
+                && !label.starts_with("漫剧")
+                && !label.starts_with("AI剧")
+                && !label.starts_with("⬇")
+                && !label.starts_with("▶")
+                && label.chars().count() > 2
+        })
+        .expect("no cards");
+    harness
+        .get_by_role_and_label(accesskit::Role::Button, &title)
+        .click();
+    pump_until(&mut harness, 40, |h| {
+        h.query_by_label_contains("播放第 1 集").is_some()
+    });
+    harness.get_by_label_contains("播放第 1 集").click();
+    pump_until(&mut harness, 40, |h| {
+        h.query_by_label_contains("正在播放：第1集").is_some()
+    });
+
+    // 关掉详情面板（✕）——看片会话必须独立存活；
+    // 先断言详情真的关了（集数网格提示消失），底栏「下一集」才唯一
+    harness.get_by_label("✕").click();
+    pump_until(&mut harness, 10, |h| {
+        h.query_by_label_contains("点击集数即播放").is_none()
+    });
+    pump_until(&mut harness, 10, |h| {
+        h.query_by_label_contains("⏭ 下一集（第2集）").is_some()
+    });
+    eprintln!("✓ 关详情后底栏播放条仍在（⏭ 下一集）");
+    harness.get_by_label_contains("⏭ 下一集").click();
+    // 详情已关：无「正在播放」面板标签，成功信号=底栏/状态里的「》第2集」
+    pump_until(&mut harness, 40, |h| {
+        h.query_all_by_label_contains("》第2集").count() >= 1
+    });
+    eprintln!("✓ 关详情后底栏「下一集」真实推进到第 2 集（解耦成立）");
 }

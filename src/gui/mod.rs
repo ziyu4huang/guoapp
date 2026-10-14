@@ -85,6 +85,10 @@ struct DetailState {
     chapters: Option<Vec<Chapter>>,
     selected: HashSet<usize>,
     error: Option<String>,
+    /// 看片/下载模式（默认看片；同一次打开内记忆切换）
+    mode: DetailMode,
+    /// 章节载入后自动开播这一集（卡片 ▶ 直播入口用；None=不自动播）
+    auto_play: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -102,6 +106,8 @@ enum DlStatus {
     Active,
     Done,
     Failed,
+    /// 用户点 ✕ 取消：不入片库、不在进行中计数里（在飞的那一集数据仍会下完）
+    Cancelled,
 }
 
 enum Msg {
@@ -176,6 +182,21 @@ enum Msg {
     Status(String),
 }
 
+/// 卡片交互结果：点封面=开详情；点 hover ▶ 角标=不开面板直接播（续看/第 1 集）。
+enum CardAction {
+    Open(Drama),
+    Play(Drama),
+}
+
+/// 详情面板的两个互不干扰的操作模式（用户令：看片与下载分开，不硬放一起）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DetailMode {
+    /// 看片（默认）：大播放按钮 + 干净的集数网格（左键播放）
+    Watch,
+    /// 下载：勾选格 + 批量按钮 + 本剧进度/取消
+    Download,
+}
+
 struct DownloadJob {
     store: Store,
     drama_id: String,
@@ -222,13 +243,29 @@ fn cat_key(genre_key: &str, sort: CatalogSort) -> String {
     format!("{genre_key}@{}", sort.key())
 }
 
-/// 正在串流播放的剧集（详情面板标记 + 下一集边界）。
+/// 看片会话：正在播的剧+全部章节+当前集。自带 chapters——播放/连播/底栏
+/// **不依赖详情面板是否打开**（旧 NowPlaying 依赖 detail 取章节数据，看片时
+/// 关掉详情面板连播链就断，是本次重构修掉的结构性缺陷）。
 #[derive(Clone)]
-struct NowPlaying {
-    drama_id: String,
-    drama_title: String,
+struct WatchSession {
+    drama: Drama,
+    chapters: Vec<Chapter>,
     ep: usize,
-    total: usize,
+}
+
+impl WatchSession {
+    fn drama_id(&self) -> &str {
+        &self.drama.id
+    }
+    fn total(&self) -> usize {
+        self.chapters.len()
+    }
+    fn ep_title(&self) -> String {
+        self.ep_title_for(self.ep)
+    }
+    fn ep_title_for(&self, ep: usize) -> String {
+        format!("《{}》第{}集", self.drama.title, ep)
+    }
 }
 
 pub struct GuiApp {
@@ -243,6 +280,8 @@ pub struct GuiApp {
     catalog_loading: HashSet<String>,
     /// 目录排序（存 state.json，跨启动记忆）。
     catalog_sort: CatalogSort,
+    /// 下载勾选状态（按剧记忆，重开详情不重置；会话内存态）
+    dl_selection: HashMap<String, HashSet<usize>>,
     search_input: String,
     search_submitted: String,
     search_results: Vec<Drama>,
@@ -255,12 +294,15 @@ pub struct GuiApp {
     player: Option<crate::player::PlayerSession>,
     /// 播放请求代数（防过期 resolve 回包串台）。
     play_seq: u64,
+    /// 看片会话（None=没在播）。与详情面板解耦：关掉详情不影响连播。
+    watch: Option<WatchSession>,
+    /// 取流中的看片会话（PlayReady 落位，seq 守卫防串台）。
+    pending_watch: Option<WatchSession>,
     /// 已预载进 mpv 播放列表的下一集（drama_id, ep）——当前集播完时 mpv
     /// 内部直接切换，无黑屏等待。
     appended_next: Option<(String, usize)>,
     /// 正在后台解析的「下一集」集号（防重复解析）。
     append_in_flight: Option<usize>,
-    now_playing: Option<NowPlaying>,
     /// 播完自动接下一集。
     autoplay_next: bool,
 }
@@ -306,10 +348,12 @@ impl GuiApp {
             status: ("就绪".into(), std::time::Instant::now()),
             player: None,
             play_seq: 0,
+            watch: None,
+            pending_watch: None,
             appended_next: None,
             append_in_flight: None,
-            now_playing: None,
             autoplay_next: true,
+            dl_selection: HashMap::new(),
             catalog_sort,
         };
         for genre in GENRES.iter() {
@@ -397,13 +441,20 @@ impl GuiApp {
         });
     }
 
-    fn open_detail(&mut self, drama: &Drama) {
+    fn open_detail(&mut self, drama: &Drama, auto_play_ep: Option<usize>) {
         let drama_id = drama.id.clone();
+        let selected = self
+            .dl_selection
+            .get(&drama.id)
+            .cloned()
+            .unwrap_or_default();
         self.detail = Some(DetailState {
             drama: drama.clone(),
             chapters: None,
-            selected: HashSet::new(),
+            selected,
             error: None,
+            mode: DetailMode::Watch,
+            auto_play: auto_play_ep,
         });
         let client = self.client.clone();
         let store = self.store.clone();
@@ -494,34 +545,40 @@ impl GuiApp {
         }
     }
 
+    /// 把看片会话的当前集写进该剧本人的播放记录（每部独立、互不共用）。
+    /// PlayReady 与连播推进两条路都调它，续看/已看灰字才不会停在老集数。
+    fn note_watch_progress(&mut self) {
+        let Some(ws) = self.watch.as_ref() else { return };
+        let rec = self.store.state.watch.entry(ws.drama.id.clone()).or_default();
+        rec.last_ep = ws.ep;
+        rec.updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let _ = self.store.save();
+    }
+
     /// 确保「下一集」已在后台解析并 append 进 mpv 播放列表——当前集自然播完
     /// 时 mpv 内部直接切换（零黑屏），这是连播连续感的根基。幂等：已预载/
     /// 已在解析/没有下一集/关连播时不动。每次集开播（PlayReady/FileLoaded）调用。
     fn ensure_next_appended(&mut self) {
-        let Some(np) = self.now_playing.as_ref() else { return };
+        let Some(ws) = self.watch.as_ref() else { return };
         if !self.autoplay_next {
             return;
         }
-        let next = np.ep + 1;
-        if next > np.total
+        let next = ws.ep + 1;
+        if next > ws.total()
             || self.appended_next.as_ref().is_some_and(|(_, n)| *n == next)
             || self.append_in_flight == Some(next)
         {
             return;
         }
-        let Some(detail) = self.detail.as_ref() else { return };
-        if detail.drama.id != np.drama_id {
-            return;
-        }
-        let Some(chapter) = detail
-            .chapters
-            .as_ref()
-            .and_then(|cs| cs.iter().find(|c| c.index == next).cloned())
-        else {
+        // 章节来自看片会话——详情面板关着也能预载下一集
+        let Some(chapter) = ws.chapters.iter().find(|c| c.index == next).cloned() else {
             return;
         };
-        let series_id = detail.drama.source_id.clone();
-        let drama_id = np.drama_id.clone();
+        let series_id = ws.drama.source_id.clone();
+        let drama_id = ws.drama.id.clone();
         let client = self.client.clone();
         let store = self.store.clone();
         let tx = self.tx.clone();
@@ -542,15 +599,36 @@ impl GuiApp {
         });
     }
 
-    fn request_play(&mut self, ep: usize) {
+    /// 从详情面板发起播放（集格/hero 按钮）。
+    fn request_play_from_detail(&mut self, ep: usize) {
         let Some(detail) = self.detail.as_ref() else { return };
-        let Some(chapter) = detail.chapters.as_ref().and_then(|cs| cs.iter().find(|c| c.index == ep).cloned()) else {
+        let drama = detail.drama.clone();
+        let chapters = detail.chapters.clone().unwrap_or_default();
+        self.begin_play(&drama, &chapters, ep);
+    }
+
+    /// 从底栏播放条发起播放（下一集/重播）——详情面板关着也能用。
+    fn request_play_from_watch(&mut self, ep: usize) {
+        let Some(ws) = self.watch.as_ref() else { return };
+        let drama = ws.drama.clone();
+        let chapters = ws.chapters.clone();
+        self.begin_play(&drama, &chapters, ep);
+    }
+
+    /// 播放公共入口：记下看片会话（pending，PlayReady 落位）并起取流线程。
+    fn begin_play(&mut self, drama: &Drama, chapters: &[Chapter], ep: usize) {
+        let Some(chapter) = chapters.iter().find(|c| c.index == ep).cloned() else {
             return;
         };
-        let series_id = detail.drama.source_id.clone();
-        let drama_id = detail.drama.id.clone();
-        let drama_title = detail.drama.title.clone();
-        let total = detail.chapters.as_ref().map(|cs| cs.len()).unwrap_or(ep);
+        let series_id = drama.source_id.clone();
+        let drama_id = drama.id.clone();
+        let drama_title = drama.title.clone();
+        let total = chapters.len();
+        self.pending_watch = Some(WatchSession {
+            drama: drama.clone(),
+            chapters: chapters.to_vec(),
+            ep,
+        });
         let client = self.client.clone();
         let store = self.store.clone();
         let tx = self.tx.clone();
@@ -634,8 +712,21 @@ impl GuiApp {
                             }
                             detail.drama = merged;
                         }
-                        detail.selected = list.iter().map(|c| c.index).collect();
+                        // 预设全选；但同剧已有手动勾选记录 → 恢复它（重开不洗掉）
+                        let all: HashSet<usize> = list.iter().map(|c| c.index).collect();
+                        let picked = self
+                            .dl_selection
+                            .entry(drama_id.clone())
+                            .or_insert(all)
+                            .clone();
+                        detail.selected = picked;
                         detail.chapters = Some(list);
+                        // 卡片 ▶ 直播入口：章节一到位就自动开播
+                        if let Some(ep) = detail.auto_play.take() {
+                            let d = detail.drama.clone();
+                            let chapters = detail.chapters.clone().unwrap_or_default();
+                            self.begin_play(&d, &chapters, ep);
+                        }
                     }
                     Err(err) => detail.error = Some(err),
                 }
@@ -675,6 +766,7 @@ impl GuiApp {
                 if seq != self.play_seq {
                     return;
                 }
+                self.append_in_flight = None;
                 let item = crate::player::PlayItem {
                     url,
                     referer,
@@ -777,16 +869,19 @@ impl GuiApp {
                     }
                 }
                 if self.player.is_some() {
-                    // 每部剧各自的播放记录（互不共用）
-                    let rec = self.store.state.watch.entry(drama_id.clone()).or_default();
-                    rec.last_ep = ep;
-                    rec.updated_at = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs() as i64)
-                        .unwrap_or(0);
-                    let _ = self.store.save();
-                    self.now_playing = Some(NowPlaying { drama_id, drama_title, ep, total });
-                    self.ensure_next_appended();
+                    // pending 会话落位（drama_id 防御性核对）
+                    let ws = self
+                        .pending_watch
+                        .take()
+                        .filter(|w| w.drama.id == drama_id && w.ep == ep);
+                    if let Some(mut ws) = ws {
+                        ws.ep = ep;
+                        self.watch = Some(ws);
+                        self.note_watch_progress();
+                        self.ensure_next_appended();
+                    } else {
+                        self.set_status(format!("▶ 正在播放：{}", drama_title));
+                    }
                 }
             }
             Msg::PlayerFileLoaded => {
@@ -794,14 +889,19 @@ impl GuiApp {
                 self.ensure_next_appended();
             }
             Msg::AppendReady { drama_id, ep, url, referer, key } => {
-                self.append_in_flight = None;
+                // 竞态修复：只有「自己发起的那次解析」回来才清 in-flight——
+                // 旧代码无条件清，手动换集后旧回包会把新解析的标记抹掉，
+                // 导致同一集 resolve 两次、append 两遍（播放列表重复）。
+                if self.append_in_flight == Some(ep) {
+                    self.append_in_flight = None;
+                }
                 // 上台守卫：必须仍是「正在播 ep-1」的同剧目会话，且连播还开着、
                 // 播放器还活着——手动换集/关连播/换剧后回来的过期预载一律丢弃。
                 let ok = self
-                    .now_playing
+                    .watch
                     .as_ref()
-                    .is_some_and(|np| {
-                        np.drama_id == drama_id && np.ep + 1 == ep && self.autoplay_next
+                    .is_some_and(|ws| {
+                        ws.drama.id == drama_id && ws.ep + 1 == ep && self.autoplay_next
                     });
                 if !ok {
                     return;
@@ -810,12 +910,12 @@ impl GuiApp {
                 if !s.ipc_ready() {
                     return;
                 }
-                let np = self.now_playing.as_ref().unwrap();
+                let ws = self.watch.as_ref().unwrap();
                 let item = crate::player::PlayItem {
                     url,
                     referer,
                     key,
-                    title: format!("《{}》第{}集", np.drama_title, ep),
+                    title: ws.ep_title_for(ep),
                 };
                 if s.append(&item).is_ok() {
                     self.appended_next = Some((drama_id, ep));
@@ -827,10 +927,10 @@ impl GuiApp {
                 // 只有 eof + 连播开 + 还有下一集才推进；stop/quit/redirect 是
                 // 我们自己 loadfile 换集/退出引起的，绝不推进。
                 let request = self
-                    .now_playing
+                    .watch
                     .as_ref()
-                    .and_then(|np| {
-                        crate::player::autoplay_next_ep(&reason, self.autoplay_next, np.ep, np.total)
+                    .and_then(|ws| {
+                        crate::player::autoplay_next_ep(&reason, self.autoplay_next, ws.ep, ws.total())
                     });
                 if let Some(next_ep) = request {
                     // 已预载 → mpv 正在内部切换（或即将切），不需要再取流；
@@ -841,25 +941,27 @@ impl GuiApp {
                         .is_some_and(|(did, n)| {
                             *n == next_ep
                                 && self
-                                    .now_playing
+                                    .watch
                                     .as_ref()
-                                    .is_some_and(|np| np.drama_id == *did)
+                                    .is_some_and(|ws| ws.drama.id == *did)
                         });
                     if preloaded {
-                        if let Some(np) = self.now_playing.as_mut() {
-                            np.ep = next_ep;
+                        if let Some(ws) = self.watch.as_mut() {
+                            ws.ep = next_ep;
                         }
-                        if let Some(np) = self.now_playing.as_ref() {
+                        // 连播推进也必须写播放记录——旧代码只写 PlayReady 路径，
+                        // 无缝连播看到第 30 集记录还停在手动播的第 1 集（续看/灰字全错）
+                        self.note_watch_progress();
+                        if let Some(ws) = self.watch.as_ref() {
                             if let Some(s) = self.player.as_ref() {
-                                let title = format!("《{}》第{}集", np.drama_title, next_ep);
-                                let _ = s.set_title(&title);
+                                let _ = s.set_title(&ws.ep_title_for(next_ep));
                             }
                         }
                         self.set_status(format!("第{}集 播完，无缝接第{}集", next_ep - 1, next_ep));
                     } else {
                         // 未预载（解析慢/关过连播又开/预载失败）：退回取流路径
                         self.set_status(format!("第{}集 播完，自动接第{}集…", next_ep - 1, next_ep));
-                        self.request_play(next_ep);
+                        self.request_play_from_watch(next_ep);
                     }
                 } else if reason == "eof" {
                     // 关着连播却还有预载条目 → 立刻丢弃，防 mpv 自动接播
@@ -869,9 +971,9 @@ impl GuiApp {
                         }
                     }
                     let label = self
-                        .now_playing
+                        .watch
                         .as_ref()
-                        .map(|np| format!("第{}集 播完（共{}集）", np.ep, np.total))
+                        .map(|ws| format!("第{}集 播完（共{}集）", ws.ep, ws.total()))
                         .unwrap_or_else(|| "播放结束".into());
                     self.set_status(label);
                 } else if reason != "stop" && reason != "quit" && reason != "redirect" {
@@ -898,11 +1000,19 @@ impl GuiApp {
         quality: i64,
         dir: &str,
     ) {
+        // 标题优先详情面板；看片中关掉面板后从看片会话兜底
+        // （旧代码只会落空串，片库会积一批《》空标题条目）
         let title = self
             .detail
             .as_ref()
             .filter(|d| d.drama.id == drama_id)
             .map(|d| d.drama.title.clone())
+            .or_else(|| {
+                self.watch
+                    .as_ref()
+                    .filter(|w| w.drama.id == drama_id)
+                    .map(|w| w.drama.title.clone())
+            })
             .unwrap_or_default();
         let entry = self
             .store
@@ -1159,23 +1269,47 @@ impl eframe::App for GuiApp {
                     "⬇".to_string()
                 });
                 ui.separator();
-                // 常驻显示串流播放状态（不随 10s 状态条过期）
+                // 常驻播放条：任意 Tab 都能看到正在播什么、能切下一集/连播
+                // （看片主目的的常驻控制位；文本全部 truncate 防 720px 最小宽挤爆）
                 let player_alive = self
                     .player
                     .as_mut()
                     .map(|s| s.process_alive())
                     .unwrap_or(false);
-                if let Some(np) = &self.now_playing {
-                    if player_alive {
-                        ui.colored_label(
-                            egui::Color32::from_rgb(255, 200, 90),
-                            format!("▶ 《{}》第{}集", np.drama_title, np.ep),
+                let mut bar_next: Option<usize> = None;
+                if let (Some(ws), true) = (&self.watch, player_alive) {
+                    let title_ws = ws.clone();
+                    if let Some(ws) = Some(&title_ws) {
+                        ui.add_sized(
+                            [180.0, 18.0],
+                            egui::Label::new(
+                                egui::RichText::new(format!("▶ {}", ws.ep_title()))
+                                    .size(12.0)
+                                    .color(egui::Color32::from_rgb(255, 200, 90)),
+                            )
+                            .truncate(),
                         );
-                        ui.separator();
                     }
+                    if ws.ep < ws.total()
+                        && ui
+                            .small_button(format!("⏭ 下一集（第{}集）", ws.ep + 1))
+                            .clicked()
+                    {
+                        bar_next = Some(ws.ep + 1);
+                    }
+                    ui.checkbox(&mut self.autoplay_next, "连播");
+                    ui.separator();
+                }
+                if let Some(ep) = bar_next {
+                    self.request_play_from_watch(ep);
                 }
                 if self.status.1.elapsed().as_secs() < 10 {
-                    ui.label(egui::RichText::new(&self.status.0).weak());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add(
+                            egui::Label::new(egui::RichText::new(&self.status.0).weak())
+                                .truncate(),
+                        );
+                    });
                 }
             });
         });
@@ -1213,7 +1347,8 @@ impl GuiApp {
             ..
         } = self;
         let sort = *catalog_sort;
-        let mut open: Option<Drama> = None;
+        let watched_ids: HashSet<String> = self.store.state.watch.keys().cloned().collect();
+        let mut open: Option<CardAction> = None;
         let mut more: Option<String> = None;
         let mut refresh = false;
         let mut switch_sort: Option<CatalogSort> = None;
@@ -1249,8 +1384,8 @@ impl GuiApp {
                     ui.add_space(6.0);
                     ui.heading(genre.name);
                     ui.add_space(2.0);
-                    if let Some(d) = cover_cache.card_grid(ui, dramas) {
-                        open = Some(d);
+                    if let Some(action) = cover_cache.card_grid(ui, dramas, &watched_ids) {
+                        open = Some(action);
                     }
                 }
                 if catalog
@@ -1304,8 +1439,20 @@ impl GuiApp {
                 self.request_catalog_page(genre.key);
             }
         }
-        if let Some(drama) = open {
-            self.open_detail(&drama);
+        match open {
+            Some(CardAction::Open(drama)) => self.open_detail(&drama, None),
+            // 卡片 ▶ 直播：续看上次那集；没看过从第 1 集（章节载入后自动开播）
+            Some(CardAction::Play(drama)) => {
+                let last = self
+                    .store
+                    .state
+                    .watch
+                    .get(&drama.id)
+                    .map(|w| w.last_ep)
+                    .unwrap_or(0);
+                self.open_detail(&drama, Some(last.max(1)));
+            }
+            None => {}
         }
     }
 
@@ -1313,6 +1460,7 @@ impl GuiApp {
         let Self { cover_cache, search_input, search_busy, search_submitted, search_results, .. } = self;
         let mut submit = false;
         let mut open: Option<Drama> = None;
+        let mut play: Option<Drama> = None;
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
                 let response = ui.add(
@@ -1335,16 +1483,31 @@ impl GuiApp {
                 ));
             }
             egui::ScrollArea::vertical().id_salt("search_scroll").show(ui, |ui| {
-                if let Some(d) = cover_cache.card_grid(ui, search_results) {
-                    open = Some(d);
+                let watched: HashSet<String> =
+                    self.store.state.watch.keys().cloned().collect();
+                if let Some(action) = cover_cache.card_grid(ui, search_results, &watched) {
+                    // 搜索结果同样支持 ▶ 直播（Play 带出详情+自动开播）
+                    match action {
+                        CardAction::Open(d) => open = Some(d),
+                        CardAction::Play(d) => play = Some(d),
+                    }
                 }
             });
         });
         if submit {
             self.request_search();
         }
-        if let Some(drama) = open {
-            self.open_detail(&drama);
+        if let Some(drama) = play {
+            let last = self
+                .store
+                .state
+                .watch
+                .get(&drama.id)
+                .map(|w| w.last_ep)
+                .unwrap_or(0);
+            self.open_detail(&drama, Some(last.max(1)));
+        } else if let Some(drama) = open {
+            self.open_detail(&drama, None);
         }
     }
 
@@ -1364,7 +1527,7 @@ impl GuiApp {
                                     ui.label(format!("《{}》", item.title));
                                     ui.label(format!("第{}集", item.ep));
                                     match item.status {
-                                        DlStatus::Active => {
+                                        DlStatus::Active | DlStatus::Cancelled => {
                                             ui.add(
                                                 egui::ProgressBar::new(item.frac.clamp(0.0, 1.0))
                                                     .show_percentage()
@@ -1426,7 +1589,13 @@ impl GuiApp {
 
     fn show_detail(&mut self, ui: &mut egui::Ui) -> bool {
         // 字段级拆借:chapters/selected 全程只读引用,不再每帧整份克隆
-        let Self { detail, cover_cache, now_playing, autoplay_next, .. } = self;
+        let Self {
+            detail,
+            cover_cache,
+            watch,
+            autoplay_next,
+            ..
+        } = self;
         let Some(detail) = detail.as_ref() else { return false };
         let drama = &detail.drama;
         let chapters = detail.chapters.as_ref();
@@ -1438,6 +1607,8 @@ impl GuiApp {
         let mut play_ep: Option<usize> = None;
         let mut clear_selection = false;
         let mut select_all = false;
+        let mut switch_mode: Option<DetailMode> = None;
+        let mut cancel_eps: Vec<usize> = Vec::new();
 
         egui::ScrollArea::vertical().id_salt("detail_scroll").show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -1475,9 +1646,23 @@ impl GuiApp {
                     }
                 });
             });
-            ui.separator();
-            ui.label(egui::RichText::new("简介").strong());
-            ui.label(if drama.intro.is_empty() { "（无）" } else { &drama.intro });
+            // ── 模式切换（用户令：看片与下载分家，不硬放一起）──
+            ui.horizontal(|ui| {
+                if ui
+                    .selectable_label(detail.mode == DetailMode::Watch, "▶ 看片")
+                    .clicked()
+                    && detail.mode != DetailMode::Watch
+                {
+                    switch_mode = Some(DetailMode::Watch);
+                }
+                if ui
+                    .selectable_label(detail.mode == DetailMode::Download, "⬇ 下载")
+                    .clicked()
+                    && detail.mode != DetailMode::Download
+                {
+                    switch_mode = Some(DetailMode::Download);
+                }
+            });
             ui.separator();
 
             match chapters {
@@ -1491,8 +1676,13 @@ impl GuiApp {
                         });
                     }
                 }
-                Some(chapters) => {
-                    // 本剧自己的播放记录（每部独立）：<= 上次播放集 = 已看
+                Some(chapters) if detail.mode == DetailMode::Watch => {
+                    // ═══ 看片模式：播放是一等公民 ═══
+                    let playing_here = watch
+                        .as_ref()
+                        .filter(|ws| ws.drama.id == drama.id)
+                        .map(|ws| ws.ep)
+                        .filter(|ep| *ep <= chapters.len());
                     let watch_last = self
                         .store
                         .state
@@ -1500,33 +1690,77 @@ impl GuiApp {
                         .get(&drama.id)
                         .map(|w| w.last_ep)
                         .unwrap_or(0);
-                    ui.label(format!("共 {} 集（点击集数即播放 · 右键勾选要下载的）", chapters.len()));
+                    // hero 按钮一步开播：正在播→下一集；有记录→续看；否则→第 1 集
+                    if let Some(cur_ep) = playing_here {
+                        if cur_ep < chapters.len() {
+                            if ui
+                                .add_sized(
+                                    [ui.available_width(), 34.0],
+                                    egui::widgets::Button::new(
+                                        egui::RichText::new(format!("⏭  下一集（第{}集）", cur_ep + 1))
+                                            .size(15.0),
+                                    ),
+                                )
+                                .clicked()
+                            {
+                                play_ep = Some(cur_ep + 1);
+                            }
+                        }
+                        ui.horizontal(|ui| {
+                            if ui.button(format!("▶ 重播第{}集", cur_ep)).clicked() {
+                                play_ep = Some(cur_ep);
+                            }
+                            ui.checkbox(autoplay_next, "连播");
+                            ui.colored_label(
+                                egui::Color32::from_rgb(255, 200, 90),
+                                format!("● 正在播放：第{}集", cur_ep),
+                            );
+                        });
+                    } else {
+                        let last = watch_last.min(chapters.len());
+                        let (hero_label, hero_ep) = if last > 0 {
+                            (format!("▶  续看第{}集", last), last)
+                        } else {
+                            ("▶  播放第 1 集".to_string(), 1)
+                        };
+                        if ui
+                            .add_sized(
+                                [ui.available_width(), 34.0],
+                                egui::widgets::Button::new(
+                                    egui::RichText::new(hero_label).size(15.0),
+                                ),
+                            )
+                            .clicked()
+                        {
+                            play_ep = Some(hero_ep);
+                        }
+                        ui.checkbox(autoplay_next, "连播");
+                    }
+                    ui.add_space(2.0);
+                    ui.label(format!(
+                        "共 {} 集（点击集数即播放 · 右键加入下载清单）",
+                        chapters.len()
+                    ));
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
                         for chapter in chapters.iter() {
-                            let picked = selected.contains(&chapter.index);
-                            // 正在串流播放的这一集：金色 + ▶ 前缀（下载勾选样式不受影响）
-                            let playing_this_ep = now_playing
-                                .as_ref()
-                                .filter(|np| np.drama_id == drama.id && np.ep == chapter.index)
-                                .is_some();
+                            let playing_this_ep = playing_here == Some(chapter.index);
                             let label_text = if playing_this_ep {
                                 format!("▶{}", chapter.index)
                             } else {
                                 format!("{}", chapter.index)
                             };
-                            let mut label =
-                                egui::RichText::new(label_text).size(11.0);
+                            let mut label = egui::RichText::new(label_text).size(11.0);
                             if playing_this_ep {
                                 label = label.strong().color(egui::Color32::from_rgb(255, 200, 90));
                             } else if chapter.index <= watch_last {
                                 label = label.color(egui::Color32::from_gray(120)); // 已看=灰
                             }
+                            // 看片模式不画下载勾选底色——那属于下载模式
                             let cell = ui.add_sized(
                                 [30.0, 20.0],
-                                egui::widgets::Button::new(label).selected(picked),
+                                egui::widgets::Button::new(label),
                             );
-                            // 左键=播放这一集（默认行为）；右键=勾选/取消下载
                             if cell.clicked() {
                                 play_ep = Some(chapter.index);
                             }
@@ -1535,7 +1769,9 @@ impl GuiApp {
                             }
                         }
                     });
-                    ui.add_space(6.0);
+                }
+                Some(chapters) => {
+                    // ═══ 下载模式：勾选/批量/进度/取消，与看片互不干扰 ═══
                     ui.horizontal(|ui| {
                         let picked_count = detail.selected.len();
                         if ui.button("全不选").clicked() {
@@ -1555,50 +1791,83 @@ impl GuiApp {
                         if ui.button("⬇ 全部下载").clicked() {
                             download_eps = Some(chapters.iter().map(|c| c.index).collect());
                         }
-                        // 串流播放：动态标签 + 下一集 + 连播开关。
-                        // 正在播本剧 → 主按钮变「下一集」，另给「重播本集」入口。
-                        let playing_here = now_playing
-                            .as_ref()
-                            .filter(|np| np.drama_id == drama.id)
-                            .map(|np| np.ep)
-                            .filter(|ep| *ep <= chapters.len());
-                        if let Some(cur_ep) = playing_here {
-                            if cur_ep < chapters.len()
-                                && ui.button(format!("⏭ 下一集（第{}集）", cur_ep + 1)).clicked()
-                            {
-                                play_ep = Some(cur_ep + 1);
-                            }
-                            if ui.button(format!("▶ 重播第{}集", cur_ep)).clicked() {
-                                play_ep = Some(cur_ep);
-                            }
-                        } else {
-                            // 本剧有播放记录 → 续看入口（优先于从第一集开始）
-                            let last = self
-                                .store
-                                .state
-                                .watch
-                                .get(&drama.id)
-                                .map(|w| w.last_ep)
-                                .unwrap_or(0);
-                            if last > 0
-                                && last <= chapters.len()
-                                && ui.button(format!("▶ 续看第{}集", last)).clicked()
-                            {
-                                play_ep = Some(last);
-                            } else if ui.button("▶ 播放第1集").clicked() {
-                                play_ep = Some(1);
-                            }
-                        }
-                        ui.checkbox(autoplay_next, "连播");
-                        if let Some(cur_ep) = playing_here {
-                            ui.colored_label(
-                                egui::Color32::from_rgb(255, 200, 90),
-                                format!("正在播放：第{}集", cur_ep),
+                    });
+                    ui.add_space(4.0);
+                    ui.label("勾选要下载的集数（右键在看片模式也能加）：");
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                        for chapter in chapters.iter() {
+                            let picked = selected.contains(&chapter.index);
+                            let cell = ui.add_sized(
+                                [30.0, 20.0],
+                                egui::widgets::Button::new(
+                                    egui::RichText::new(format!("{}", chapter.index)).size(11.0),
+                                )
+                                .selected(picked),
                             );
+                            // 下载模式里左键=勾选（主操作）；右键同样勾选（与看片模式手感一致）
+                            if cell.clicked() || cell.secondary_clicked() {
+                                toggled = Some(chapter.index);
+                            }
                         }
                     });
+                    ui.add_space(6.0);
+                    // 本剧的下载进度 + 取消（误勾全选的刹车）
+                    let rows: Vec<(usize, String, f32, DlStatus)> = self
+                        .downloads
+                        .iter()
+                        .filter(|d| d.drama_id == drama.id)
+                        .map(|d| (d.ep, d.note.clone(), d.frac, d.status))
+                        .collect();
+                    if !rows.is_empty() {
+                        ui.separator();
+                        for (ep, note, frac, status) in rows {
+                            ui.horizontal(|ui| {
+                                match status {
+                                    DlStatus::Cancelled => {
+                                        ui.label(
+                                            egui::RichText::new(format!("第{}集 已取消", ep))
+                                                .size(11.0)
+                                                .weak(),
+                                        );
+                                    }
+                                    DlStatus::Active => {
+                                        ui.label(
+                                            egui::RichText::new(format!("第{}集", ep)).size(11.0),
+                                        );
+                                        let bar = egui::ProgressBar::new(frac)
+                                            .desired_height(12.0);
+                                        ui.add(bar);
+                                        ui.label(
+                                            egui::RichText::new(note.clone()).size(10.0).weak(),
+                                        );
+                                        if ui.small_button("✕").clicked() {
+                                            cancel_eps.push(ep);
+                                        }
+                                    }
+                                    DlStatus::Done => {
+                                        ui.label(
+                                            egui::RichText::new(format!("第{}集 完成", ep))
+                                                .size(11.0)
+                                                .color(egui::Color32::from_rgb(120, 200, 120)),
+                                        );
+                                    }
+                                    DlStatus::Failed => {
+                                        ui.label(
+                                            egui::RichText::new(format!("第{}集 失败：{}", ep, note))
+                                                .size(11.0)
+                                                .color(egui::Color32::from_rgb(220, 90, 80)),
+                                        );
+                                    }
+                                }
+                            });
+                        }
+                    }
                 }
             }
+            ui.separator();
+            ui.label(egui::RichText::new("简介").strong());
+            ui.label(if drama.intro.is_empty() { "（无）" } else { &drama.intro });
         });
         if let Some(index) = toggled {
             if let Some(detail) = self.detail.as_mut() {
@@ -1609,6 +1878,24 @@ impl GuiApp {
                 }
             }
         }
+        if let Some(mode) = switch_mode {
+            if let Some(detail) = self.detail.as_mut() {
+                detail.mode = mode;
+            }
+        }
+        // 取消下载：标记 Cancelled——进度区隐藏、完成时不再登记入片库
+        if !cancel_eps.is_empty() {
+            for d in self.downloads.iter_mut() {
+                if d.drama_id == self.detail.as_ref().map(|x| x.drama.id.clone()).unwrap_or_default()
+                    && cancel_eps.contains(&d.ep)
+                    && d.status == DlStatus::Active
+                {
+                    d.status = DlStatus::Cancelled;
+                    d.note = "已取消".into();
+                }
+            }
+            self.set_status(format!("已取消 {} 集的下载", cancel_eps.len()));
+        }
         if clear_selection || select_all {
             if let Some(detail) = self.detail.as_mut() {
                 if clear_selection {
@@ -1618,11 +1905,19 @@ impl GuiApp {
                 }
             }
         }
+        // 勾选状态按剧记忆（重开详情恢复，不洗掉用户上次的选择）
+        if let Some(detail) = self.detail.as_ref() {
+            if let Some(slot) = self.dl_selection.get_mut(&detail.drama.id) {
+                if *slot != detail.selected {
+                    *slot = detail.selected.clone();
+                }
+            }
+        }
         if let Some(eps) = download_eps {
             self.queue_download(eps);
         }
         if let Some(ep) = play_ep {
-            self.request_play(ep);
+            self.request_play_from_detail(ep);
         }
         !close
     }
@@ -1636,31 +1931,38 @@ impl CoverCache {
         &mut self,
         ui: &mut egui::Ui,
         dramas: &[Drama],
-    ) -> Option<Drama> {
+        watched: &HashSet<String>,
+    ) -> Option<CardAction> {
         if dramas.is_empty() {
             return None;
         }
         let columns = ((ui.available_width() / (COVER_W + 10.0)).floor() as usize).clamp(1, 12);
-        let mut open: Option<Drama> = None;
+        let mut action: Option<CardAction> = None;
         for row in dramas.chunks(columns) {
-            let mut picked: Option<Drama> = None;
+            let mut picked: Option<CardAction> = None;
             ui.horizontal(|ui| {
                 for drama in row {
-                    if let Some(d) = self.card(ui, drama) {
-                        picked = Some(d);
+                    if let Some(a) = self.card(ui, drama, watched) {
+                        picked = Some(a);
                     }
                 }
             });
             if picked.is_some() {
-                open = picked;
+                action = picked;
             }
         }
-        open
+        action
     }
 
-    fn card(&mut self, ui: &mut egui::Ui, drama: &Drama) -> Option<Drama> {
+    fn card(
+        &mut self,
+        ui: &mut egui::Ui,
+        drama: &Drama,
+        watched: &HashSet<String>,
+    ) -> Option<CardAction> {
         let texture = self.texture(&drama.cover);
-        let mut clicked = false;
+        let mut open = false;
+        let mut play = false;
         ui.vertical(|ui| {
             let (rect, _) =
                 ui.allocate_exact_size([COVER_W, COVER_H].into(), egui::Sense::hover());
@@ -1692,7 +1994,32 @@ impl CoverCache {
                 egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &drama.title)
             });
             if card.clicked() {
-                clicked = true;
+                open = true;
+            }
+            // hover ▶ 角标：不开详情、一步开播（续看/第 1 集）——看片主动线的第一跳
+            if card.hovered() {
+                let is_watched = watched.contains(&drama.id);
+                let badge = format!("▶ {}", if is_watched { "续看" } else { "播放" });
+                let badge_rect = egui::Rect::from_min_size(
+                    egui::Pos2::new(rect.left(), rect.bottom() - 30.0),
+                    egui::vec2(rect.width(), 30.0),
+                );
+                painter.rect_filled(badge_rect, 0.0, egui::Color32::from_black_alpha(160));
+                painter.text(
+                    badge_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    &badge,
+                    egui::FontId::proportional(13.0),
+                    egui::Color32::from_rgb(255, 200, 90),
+                );
+                let play_zone = ui.interact(
+                    badge_rect,
+                    egui::Id::new(&drama.id).with("play"),
+                    egui::Sense::click(),
+                );
+                if play_zone.clicked() {
+                    play = true;
+                }
             }
             ui.add_sized(
                 [COVER_W, 16.0],
@@ -1729,8 +2056,11 @@ impl CoverCache {
                 );
             }
         });
-        if clicked {
-            return Some(drama.clone());
+        if play {
+            return Some(CardAction::Play(drama.clone()));
+        }
+        if open {
+            return Some(CardAction::Open(drama.clone()));
         }
         None
     }

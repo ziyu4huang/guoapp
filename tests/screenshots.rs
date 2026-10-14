@@ -150,15 +150,17 @@ fn capture_feature_screenshots() {
         .get_by_role_and_label(accesskit::Role::Button, &title)
         .click();
     pump_until(&mut harness, 40, |h| {
-        h.query_by_label_contains("全部下载").is_some()
+        h.query_by_label_contains("点击集数即播放").is_some()
     });
     settle(&mut harness, 5);
     save_png(&mut harness, &out, "detail.png");
 
-    // 4. 下载第 1 集：进度条出现后截「下载中」，完成标志出现后截「片库」
+    // 4. 切「⬇ 下载」模式，下载第 1 集：进度条出现后截「下载中」，完成后截「片库」
+    harness.get_by_label_contains("⬇ 下载").click();
     harness.run_steps(2);
     harness.get_by_label("全不选").click();
     harness.run_steps(2);
+    // 下载模式内左键=勾选（看片模式左键=播放，勿混）
     harness
         .get_by_role_and_label(accesskit::Role::Button, "1")
         .click();

@@ -166,12 +166,15 @@ fn record_demo_gif() {
         .get_by_role_and_label(accesskit::Role::Button, &title)
         .click();
     let opened = rec.record_until(&mut harness, 40, 300, |h| {
-        h.query_by_label_contains("全部下载").is_some()
+        h.query_by_label_contains("点击集数即播放").is_some()
     });
     assert!(opened, "详情未展开");
     rec.record(&mut harness, 1200, 260);
 
-    // D. 全不选后右键勾选第 1 集（左键=播放）→ 下载选中 → 切片库看进度条
+    // D. 切「⬇ 下载」模式 → 全不选 → 右键勾第 1 集 → 下载选中 → 切片库看进度条
+    harness.get_by_label_contains("⬇ 下载").click();
+    harness.run_steps(2);
+    rec.snap(&mut harness);
     harness.get_by_label("全不选").click();
     harness.run_steps(2);
     rec.snap(&mut harness);
@@ -563,9 +566,9 @@ fn gui_play_now_playing() {
         .get_by_role_and_label(accesskit::Role::Button, &title)
         .click();
     pump_until(&mut harness, 40, |h| {
-        h.query_by_label_contains("播放第1集").is_some()
+        h.query_by_label_contains("播放第 1 集").is_some()
     });
-    harness.get_by_label_contains("播放第1集").click();
+    harness.get_by_label_contains("播放第 1 集").click();
 
     // 详情面板:「正在播放:第1集」标记(依赖 mpv spawn 成功)
     pump_until(&mut harness, 40, |h| {
@@ -575,9 +578,9 @@ fn gui_play_now_playing() {
     pump_until(&mut harness, 10, |h| {
         h.query_by_label_contains("▶1").is_some()
     });
-    // 下一集按钮出现(第1集在播 → 下一集=第2集)
+    // 下一集按钮出现(hero + 底栏播放条各一,算數≥1)
     pump_until(&mut harness, 10, |h| {
-        h.query_by_label_contains("下一集").is_some()
+        h.query_all_by_label_contains("下一集").count() >= 1
     });
     eprintln!("✓ GUI 播放链路:now_playing 标记/▶1 集格标记/下一集按钮 全部在场");
 }
