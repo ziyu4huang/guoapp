@@ -93,6 +93,7 @@ fn download_bundle(
     let mut seen_assets = std::collections::HashSet::new();
     let mut bundle_quality = media.quality;
 
+    #[allow(clippy::too_many_arguments)] // HLS 遍歷上下文參數天然多;重構簽名風險大於收益
     fn walk(
         client: &HgClient,
         media: &Media,
@@ -241,7 +242,7 @@ fn fetch_playlist(client: &HgClient, address: &str, referer: &str) -> Result<Str
     Ok(text)
 }
 
-fn attribute<'a>(line: &'a str, key: &str) -> Option<String> {
+fn attribute(line: &str, key: &str) -> Option<String> {
     let needle = format!("{}=", key);
     for part in line.split(',') {
         let part = part.trim();
@@ -284,8 +285,7 @@ fn select_variant(lines: &[String], quality: i64) -> Option<(Vec<String>, i64)> 
                 group_for.insert(kind.to_string(), group);
             }
         }
-        for next in index + 1..lines.len() {
-            let text = lines[next].trim();
+        for (next, text) in lines[index + 1..].iter().enumerate().map(|(i, l)| (i + index + 1, l.trim())) {
             if text.is_empty() || text.starts_with('#') {
                 continue;
             }
@@ -568,6 +568,7 @@ fn probe_range(client: &HgClient, address: &str, referer: &str) -> Option<u64> {
 }
 
 /// 单段下载线程体：Range 拉自己的区间，断线按段内偏移续传（重试 3 次）。
+#[allow(clippy::too_many_arguments)] // 线程体入参天然多;重构成参数结构体可读性反降
 fn fetch_segment(
     client: &HgClient,
     address: &str,
@@ -578,7 +579,7 @@ fn fetch_segment(
     downloaded: &std::sync::atomic::AtomicU64,
     abort: &std::sync::atomic::AtomicBool,
 ) -> Result<(), String> {
-    use std::io::{Read, Seek, SeekFrom, Write};
+    use std::io::{Read, Seek, SeekFrom};
     let mut pos = start;
     for _ in 0..3 {
         if abort.load(std::sync::atomic::Ordering::Relaxed) {
@@ -591,7 +592,7 @@ fn fetch_segment(
             .set("Referer", referer)
             .set("Accept-Encoding", "identity")
             .set("Range", &format!("bytes={pos}-{}", end - 1));
-        let mut response = match request.call() {
+        let response = match request.call() {
             Ok(r) if r.status() == 206 => r,
             Ok(r) => return Err(format!("分段 HTTP {}", r.status())),
             Err(e) => {
@@ -609,7 +610,8 @@ fn fetch_segment(
         }
         let mut reader = response.into_reader();
         let mut buffer = [0u8; 64 << 10];
-        let mut retry = false;
+        // 读循环:Ok(0) 且未达段末/读错误 = 断流 → 带段内偏移重连;
+        // 完整到达 end → Ok
         loop {
             if abort.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err("已中止".into());
@@ -619,8 +621,7 @@ fn fetch_segment(
                     if pos == end {
                         return Ok(());
                     }
-                    retry = true; // 提前断流 → 带段内偏移重连
-                    break;
+                    break; // 提前断流 → 重连
                 }
                 Ok(n) => {
                     if file.write_all(&buffer[..n]).is_err() {
@@ -629,16 +630,16 @@ fn fetch_segment(
                     pos += n as u64;
                     downloaded.fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
                 }
-                Err(_) => {
-                    retry = true;
-                    break;
-                }
+                Err(_) => break,
             }
         }
-        if !retry {
-            return Err("分段长度不足".into());
+        if pos != end {
+            // 走到这=断流重试;重试耗尽由外层 for 兜底
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            continue;
         }
-        std::thread::sleep(std::time::Duration::from_millis(400));
+        // 完整到达段末
+        return Ok(());
     }
     Err("分段重试耗尽".into())
 }

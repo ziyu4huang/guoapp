@@ -58,10 +58,10 @@ pub fn loader_map<'a>(data: &'a Value, names: &[&str]) -> Option<&'a Value> {
     for (key, value) in loader.as_object()? {
         for name in names {
             let prefix = name.strip_suffix('$').unwrap_or(name);
-            if !prefix.is_empty() && key.starts_with(prefix) {
-                if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
-                    return Some(value);
-                }
+            if !prefix.is_empty() && key.starts_with(prefix)
+                && value.as_object().is_some_and(|o| !o.is_empty())
+            {
+                return Some(value);
             }
         }
     }

@@ -514,7 +514,7 @@ fn online_date(vd: &Value) -> String {
 fn china_date(day_offset: i64) -> String {
     // UTC+8 "today" without pulling in chrono.
     let secs = crate::sign::now_ms() / 1000 + 8 * 3600 + day_offset * 86400;
-    let days = secs.div_euclid(86400) as i64;
+    let days = secs.div_euclid(86400);
     civil_from_days(days)
 }
 

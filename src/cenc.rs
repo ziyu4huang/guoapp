@@ -91,15 +91,7 @@ fn parse_track(data: &[u8], trak_start: usize, trak_end: usize) -> Option<Track>
             // visual, 28 for audio); locate frma/tenc by scanning for their
             // fourccs instead of walking from a guessed offset.
             let find = |needle: &[u8; 4]| -> Option<usize> {
-                (off + 8..off + entry_size)
-                    .filter_map(|p| {
-                        if p + 4 <= off + entry_size && &data[p..p + 4] == needle {
-                            Some(p)
-                        } else {
-                            None
-                        }
-                    })
-                    .next()
+                (off + 8..off + entry_size).find(|p| p + 4 <= off + entry_size && &data[*p..*p + 4] == needle)
             };
             let frma_pos = find(b"frma");
             let tenc_pos = find(b"tenc");
@@ -301,7 +293,7 @@ fn sample_offsets(track: &Track) -> Vec<u64> {
 }
 
 /// Decrypt a CENC-encrypted progressive MP4 held in `data`.
-pub fn decrypt_buffer(data: &mut Vec<u8>, key: &[u8; 16]) -> Result<usize, String> {
+pub fn decrypt_buffer(data: &mut [u8], key: &[u8; 16]) -> Result<usize, String> {
     let (moov_body, moov_end) = box_body(data, 0, data.len(), b"moov")
         .ok_or_else(|| "MP4 缺少 moov，无法解密".to_string())?;
     let mut decrypted = 0usize;

@@ -40,7 +40,7 @@ fn aes_cbc_decrypt(key: &[u8], iv: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, 
 }
 
 fn pkcs7_unpad(data: &[u8]) -> Option<Vec<u8>> {
-    if data.is_empty() || data.len() % 16 != 0 {
+    if data.is_empty() || !data.len().is_multiple_of(16) {
         return None;
     }
     let padding = *data.last()? as usize;

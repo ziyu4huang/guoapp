@@ -1,7 +1,7 @@
 //! Small helpers for navigating `serde_json::Value` the way the original Go
 //! code does with `mapString` / `anyList` / `nestedMap`.
 
-pub fn jstr<'a>(v: &'a serde_json::Value, keys: &[&str]) -> String {
+pub fn jstr(v: &serde_json::Value, keys: &[&str]) -> String {
     for key in keys {
         if let Some(s) = v.get(*key).and_then(|x| x.as_str()) {
             let s = s.trim();

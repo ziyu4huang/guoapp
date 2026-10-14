@@ -486,9 +486,7 @@ impl PlayerSession {
             &format!("{{\"command\": [\"set_property\", \"force-media-title\", {:?}]}}\n", title),
         )?;
         if !reply.contains("\"error\":\"success\"") {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("set_property 被拒绝：{}", reply.trim()),
+            return Err(std::io::Error::other(format!("set_property 被拒绝：{}", reply.trim()),
             ));
         }
         Ok(())
@@ -526,9 +524,7 @@ impl PlayerSession {
             let mut conn = open_ipc(&self.ipc)?;
             let reply = send_cmd_with_reply(&mut conn, "{\"command\": [\"playlist-clear\"]}\n")?;
             if !reply.contains("\"error\":\"success\"") {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("playlist-clear 被拒绝：{}", reply.trim()),
+                return Err(std::io::Error::other(format!("playlist-clear 被拒绝：{}", reply.trim()),
                 ));
             }
             Ok(())
@@ -590,18 +586,14 @@ impl PlayerSession {
                 item.title
             ))?;
             if !title_reply.contains("\"error\":\"success\"") {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("set_property 被拒绝：{}", title_reply.trim()),
+                return Err(std::io::Error::other(format!("set_property 被拒绝：{}", title_reply.trim()),
                 ));
             }
         }
         let load = Self::loadfile_cmd(item, mode);
         let load_reply = send_cmd_with_reply(&mut conn, &load)?;
         if !load_reply.contains("\"error\":\"success\"") {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("loadfile 被拒绝：{}", load_reply.trim()),
+            return Err(std::io::Error::other(format!("loadfile 被拒绝：{}", load_reply.trim()),
             ));
         }
         Ok(())
@@ -659,7 +651,7 @@ fn render_args(kind: PlayerKind, args: Vec<String>) -> Vec<String> {
 }
 
 /// 连接 IPC：Unix = UnixStream；Windows = 以文件方式打开命名管道。
-enum IpcConn {
+pub enum IpcConn {
     #[cfg(unix)]
     Unix(std::os::unix::net::UnixStream),
     #[cfg(windows)]
@@ -806,7 +798,7 @@ pub fn event_loop(
     use std::sync::atomic::Ordering;
     let debug = std::env::var("GUO_MPV_EVENT_DEBUG").map(|v| v == "1").unwrap_or(false);
     while running.load(Ordering::Relaxed) {
-        let Ok(mut conn) = open_ipc(ipc) else {
+        let Ok(conn) = open_ipc(ipc) else {
             std::thread::sleep(std::time::Duration::from_millis(300));
             continue;
         };

@@ -11,6 +11,51 @@ use std::io::Write as _;
 #[global_allocator]
 static GLOBAL_ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+/// panic 现场写入数据目录 panic.log(尽力而为,失败静默)——公开版用户
+/// 不会填 issue,有现场日志才可诊断。
+fn install_panic_hook() {
+    let default_dir = || -> std::path::PathBuf {
+        if let Ok(x) = std::env::var("XDG_DATA_HOME") {
+            if !x.is_empty() {
+                return std::path::PathBuf::from(x).join("guoapp");
+            }
+        }
+        if cfg!(target_os = "windows") {
+            let home = std::env::var("USERPROFILE")
+                .or_else(|_| std::env::var("HOME"))
+                .unwrap_or_else(|_| ".".into());
+            return std::path::PathBuf::from(home).join("AppData").join("Local").join("guoapp");
+        }
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        if cfg!(target_os = "macos") {
+            std::path::PathBuf::from(home).join("Library/Application Support/guoapp")
+        } else {
+            std::path::PathBuf::from(home).join(".local/share/guoapp")
+        }
+    };
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let msg = format!(
+            "\n[panic {}] {}\n{}\n",
+            ts,
+            info,
+            std::backtrace::Backtrace::force_capture()
+        );
+        let dir = default_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("panic.log"))
+            .and_then(|mut f| std::io::Write::write_all(&mut f, msg.as_bytes()));
+        default_hook(info);
+    }));
+}
+
 const USAGE: &str = "\
 guo — 红果短剧命令行工具（guoapp 的 Rust 重写核心）
 
@@ -28,6 +73,7 @@ guo — 红果短剧命令行工具（guoapp 的 Rust 重写核心）
 数据目录: $GUOAPP_DATA 或 ~/.local/share/guoapp（macOS: ~/Library/Application Support/guoapp）。";
 
 fn main() {
+    install_panic_hook();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() || args[0] == "-h" || args[0] == "--help" {
         println!("{}", USAGE);
@@ -41,16 +87,16 @@ fn main() {
     let client = HgClient::new();
     let rest = &args[1..];
     let code = match args[0].as_str() {
-        "catalog" => catalog(&client, &mut store, &rest),
-        "search" => search(&client, &rest),
-        "suggest" => suggest(&client, &rest),
-        "detail" => detail(&client, &store, &rest),
-        "resolve" => resolve(&client, &store, &rest),
-        "play" => play(&client, &store, &rest),
-        "download" => download(&client, &mut store, &rest),
-        "library" => library(&store, &rest),
+        "catalog" => catalog(&client, &mut store, rest),
+        "search" => search(&client, rest),
+        "suggest" => suggest(&client, rest),
+        "detail" => detail(&client, &store, rest),
+        "resolve" => resolve(&client, &store, rest),
+        "play" => play(&client, &store, rest),
+        "download" => download(&client, &mut store, rest),
+        "library" => library(&store, rest),
         "cenc-debug" => {
-            let (_, flags) = parse_args(&rest);
+            let (_, flags) = parse_args(rest);
             match flags.get("file") {
                 Some(file) => {
                     println!("{}", guo::cenc::inspect(std::path::Path::new(file)));
@@ -59,7 +105,7 @@ fn main() {
                 None => fail("用法：guo cenc-debug --file <mp4>"),
             }
         }
-        "fetch" => fetch(&client, &rest),
+        "fetch" => fetch(&client, rest),
         other => fail(&format!("未知命令 {}（guo 查看用法）", other)),
     };
     let _ = store.save();
@@ -442,7 +488,7 @@ fn play(client: &HgClient, store: &Store, rest: &[String]) -> i32 {
             let item = guo::player::PlayItem {
                 url: media.url.clone(),
                 referer: media.referer.clone(),
-                key: media.cenc_key.as_ref().map(|k| hex::encode(k)),
+                key: media.cenc_key.as_ref().map(hex::encode),
                 title: format!("《{}》第{}集", drama.title, episode),
                 // CLI 支援 --from 秒数（精确续看同款机制）
                 start: flags

@@ -76,9 +76,9 @@ impl CoverCache {
     /// 后台抓取完成：落地纹理（下次帧即显示，配合 update 的 repaint 触发）。
     fn deliver(&mut self, ctx: &egui::Context, url: String, rgba: Option<(Vec<u8>, usize, usize)>) {
         self.pending.remove(&url);
-        let handle = rgba.and_then(|(bytes, w, h)| {
+        let handle = rgba.map(|(bytes, w, h)| {
             let image = egui::ColorImage::from_rgba_unmultiplied([w, h], &bytes);
-            Some(ctx.load_texture("cover", image, Default::default()))
+            ctx.load_texture("cover", image, Default::default())
         });
         // FIFO 逐出：纹理只进不出=显存/内存线性涨（长会话刷多页实测路径）
         if !self.order.contains(&url) {
@@ -130,6 +130,7 @@ enum DlStatus {
     Cancelled,
 }
 
+#[allow(clippy::large_enum_variant)] // 通道訊息;Box 化 CatalogPage 的 Vec 換來的只是搬運指針
 enum Msg {
     CatalogPage {
         genre: String,
@@ -174,6 +175,7 @@ enum Msg {
         drama_id: String,
         drama_title: String,
         ep: usize,
+        #[allow(dead_code)]
         total: usize,
         url: String,
         referer: String,
@@ -282,9 +284,6 @@ struct WatchSession {
 }
 
 impl WatchSession {
-    fn drama_id(&self) -> &str {
-        &self.drama.id
-    }
     fn total(&self) -> usize {
         self.chapters.len()
     }
@@ -310,6 +309,8 @@ pub struct GuiApp {
     catalog_sort: CatalogSort,
     /// 下载勾选状态（按剧记忆，重开详情不重置；会话内存态）
     dl_selection: HashMap<String, HashSet<usize>>,
+    /// 目录显示过滤（None=全部；Some(genre_key)=只显示该分类）
+    catalog_view: Option<String>,
     search_input: String,
     search_submitted: String,
     search_results: Vec<Drama>,
@@ -382,6 +383,7 @@ impl GuiApp {
             append_in_flight: None,
             autoplay_next: true,
             dl_selection: HashMap::new(),
+            catalog_view: None,
             catalog_sort,
         };
         for genre in GENRES.iter() {
@@ -409,8 +411,8 @@ impl GuiApp {
             GENRES.iter().find(|g| g.key == genre_key);
         thread::spawn(move || {
             let Some(genre) = genre else { return };
-            let cursor = store.feed(&cat_key(genre.key, sort));
-            match client.catalog_page(&store, &genre, &cursor, sort.key()) {
+            let cursor = store.feed(cat_key(genre.key, sort).as_str());
+            match client.catalog_page(&store, genre, &cursor, sort.key()) {
                 Ok((items, next)) => {
                     let _ = tx.send(Msg::CatalogPage {
                         genre: genre.key.to_string(),
@@ -473,7 +475,7 @@ impl GuiApp {
         let drama_id = drama.id.clone();
         let selected = self
             .dl_selection
-            .get(&drama.id)
+            .get(drama.id.as_str())
             .cloned()
             .unwrap_or_default();
         self.detail = Some(DetailState {
@@ -581,6 +583,10 @@ impl GuiApp {
         let rec = self.store.state.watch.entry(ws.drama.id.clone()).or_default();
         rec.last_ep = ws.ep;
         rec.title = ws.drama.title.clone();
+        // 见过的总集数就地增长(追更提醒的基准线:目录超过它=有新集)
+        if ws.total() > rec.seen_total {
+            rec.seen_total = ws.total();
+        }
         rec.updated_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
@@ -760,13 +766,7 @@ impl GuiApp {
     fn start_session_with_item(&mut self, item: crate::player::PlayItem, ws: WatchSession) {
         // 单实例：会话还活着且 IPC 可达 → 直接换集（不闪新窗口）
         let reuse = match self.player.as_mut() {
-            Some(s) => {
-                if s.process_alive() && s.ipc_ready() {
-                    s.load(&item).is_ok()
-                } else {
-                    false
-                }
-            }
+            Some(s) => s.process_alive() && s.ipc_ready() && s.load(&item).is_ok(),
             None => false,
         };
         if reuse {
@@ -802,7 +802,7 @@ impl GuiApp {
                         // snapshot 持有自己的 tx 克隆（避免借住 tx_events，
                         // 挡住 event_loop 闭包的 move 捕获）。
                         let tx_snap = tx_events.clone();
-                        let mut snapshot = move |ipc: &Path| {
+                        let snapshot = move |ipc: &Path| {
                             let tx2 = tx_snap.clone();
                             let ipc2 = ipc.to_path_buf();
                             thread::spawn(move || {
@@ -864,7 +864,7 @@ impl GuiApp {
                     let log_path = self.store.dir.join("mpv-last.log");
                     let tail = crate::player::tail_lines(&log_path, 2);
                     let hint = if tail.is_empty() {
-                        format!("（未安装？参考 README 安装 mpv，或设 GUO_MPV 指向可执行文件）")
+                        "（未安装？参考 README 安装 mpv，或设 GUO_MPV 指向可执行文件）".to_string()
                     } else {
                         format!("（日志尾行：{}）", tail)
                     };
@@ -946,6 +946,14 @@ impl GuiApp {
                             .or_insert(all)
                             .clone();
                         detail.selected = picked;
+                        // 到访即更新「见过总集数」基准——追更提醒只在没看过的新集上出现
+                        if list.len() > 0 {
+                            let rec = self.store.state.watch.entry(drama_id.clone()).or_default();
+                            if list.len() > rec.seen_total {
+                                rec.seen_total = list.len();
+                                let _ = self.store.save();
+                            }
+                        }
                         detail.chapters = Some(list);
                         // 卡片 ▶ 直播入口：章节一到位就自动开播
                         if let Some(ep) = detail.auto_play.take() {
@@ -986,7 +994,7 @@ impl GuiApp {
                     self.record_library_episode(&drama_id, ep, &file, kind, quality, &dir);
                 }
             }
-            Msg::PlayReady { drama_id, drama_title, ep, total, url, referer, key, start, seq } => {
+            Msg::PlayReady { drama_id, drama_title, ep, total: _, url, referer, key, start, seq } => {
                 // 过期回包丢弃：用户连点两集/连播与手动点击并发时，只有最后
                 // 一次请求的 resolve 结果允许上台（后完成抢播 = 播错集）。
                 if seq != self.play_seq {
@@ -1490,15 +1498,39 @@ impl GuiApp {
             catalog_loading,
             catalog_exhausted,
             catalog_sort,
+            catalog_view,
             ..
         } = self;
         let sort = *catalog_sort;
+        let catalog_view = catalog_view.clone();
         let watched_ids: HashSet<String> = self.store.state.watch.keys().cloned().collect();
         let continue_list = crate::state::continue_watching(&self.store.state.watch, 10);
+        // 追更比对：看过(≥1集)且目录总集数 > 见过的总集数 → 该剧有新集
+        let mut new_eps: HashMap<String, usize> = HashMap::new();
+        for slot in catalog.values() {
+            for d in slot.iter() {
+                if let Some(rec) = self.store.state.watch.get(&d.id) {
+                    if rec.last_ep == 0 || rec.seen_total == 0 {
+                        continue;
+                    }
+                    let count: usize = d
+                        .episode_count
+                        .chars()
+                        .filter(|c| c.is_ascii_digit())
+                        .collect::<String>()
+                        .parse()
+                        .unwrap_or(0);
+                    if count > rec.seen_total {
+                        new_eps.insert(d.id.clone(), count - rec.seen_total);
+                    }
+                }
+            }
+        }
         let mut open: Option<CardAction> = None;
         let mut more: Option<String> = None;
         let mut refresh = false;
         let mut switch_sort: Option<CatalogSort> = None;
+        let mut switch_view: Option<Option<String>> = None;
         let mut continue_ep: Option<(String, usize)> = None;
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -1509,12 +1541,26 @@ impl GuiApp {
                     }
                 }
                 ui.separator();
-                ui.label("分类：");
+                ui.label("显示：");
+                if ui.selectable_label(catalog_view.is_none(), "全部").clicked() {
+                    switch_view = None;
+                }
                 for genre in GENRES.iter() {
                     let count = catalog.get(&cat_key(genre.key, sort)).map(|v| v.len()).unwrap_or(0);
                     let label = format!("{} ({})", genre.name, count);
                     let busy = catalog_loading.contains(&cat_key(genre.key, sort));
-                    if ui.selectable_label(!busy, label).clicked() && count == 0 && !busy {
+                    if ui
+                        .selectable_label(catalog_view.as_deref() == Some(genre.key), label)
+                        .clicked()
+                    {
+                        switch_view = Some(Some(genre.key.to_string()));
+                    }
+                    // 切到该分类时若还没数据 → 顺手懒加载第一页
+                    if catalog_view.as_deref() == Some(genre.key)
+                        && count == 0
+                        && !busy
+                        && !catalog_exhausted.contains(&cat_key(genre.key, sort))
+                    {
                         more = Some(genre.key.to_string());
                     }
                 }
@@ -1527,8 +1573,9 @@ impl GuiApp {
                 ui.horizontal_wrapped(|ui| {
                     ui.label("继续观看：");
                     for (id, title, ep) in &continue_list {
+                        let fresh = new_eps.get(id).map(|k| format!(" 🔔+{}", k)).unwrap_or_default();
                         if ui
-                            .small_button(format!("《{}》续看第{}集", title, ep))
+                            .small_button(format!("《{}》续看第{}集{}", title, ep, fresh))
                             .clicked()
                         {
                             continue_ep = Some((id.clone(), *ep));
@@ -1539,6 +1586,10 @@ impl GuiApp {
             }
             egui::ScrollArea::vertical().id_salt("catalog_scroll").show(ui, |ui| {
                 for genre in GENRES.iter() {
+                    // 显示过滤：选了单一分类只渲染它（旧代码三类全堆叠=用户报「不正常」）
+                    if catalog_view.as_deref().is_some_and(|v| v != genre.key) {
+                        continue;
+                    }
                     let Some(dramas) = catalog.get(&cat_key(genre.key, sort)) else { continue };
                     if dramas.is_empty() {
                         continue;
@@ -1546,14 +1597,26 @@ impl GuiApp {
                     ui.add_space(6.0);
                     ui.heading(genre.name);
                     ui.add_space(2.0);
-                    if let Some(action) = cover_cache.card_grid(ui, dramas, &watched_ids) {
+                    if let Some(action) = cover_cache.card_grid(ui, dramas, &watched_ids, &new_eps) {
                         open = Some(action);
                     }
                 }
-                if catalog
+                let visible_empty = catalog
                     .iter()
                     .filter(|(k, _)| k.ends_with(&format!("@{}", sort.key())))
-                    .all(|(_, v)| v.is_empty())
+                    .filter(|(k, _)| {
+                        catalog_view
+                            .as_deref()
+                            .map_or(true, |v| k.starts_with(&format!("{v}@")))
+                    })
+                    .all(|(_, v)| v.is_empty());
+                if visible_empty
+                    && GENRES.iter().all(|g| {
+                        catalog_view
+                            .as_deref()
+                            .is_some_and(|v| v != g.key)
+                            || !catalog_loading.contains(&cat_key(g.key, sort))
+                    })
                 {
                     ui.add_space(30.0);
                     ui.vertical_centered(|ui| {
@@ -1568,6 +1631,9 @@ impl GuiApp {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     for genre in GENRES.iter() {
+                        if catalog_view.as_deref().is_some_and(|v| v != genre.key) {
+                            continue;
+                        }
                         let gkey = cat_key(genre.key, sort);
                         let busy = catalog_loading.contains(&gkey);
                         let label = if busy {
@@ -1606,6 +1672,9 @@ impl GuiApp {
         }
         if let Some(sort) = switch_sort {
             self.set_catalog_sort(sort);
+        }
+        if switch_view.is_some() {
+            self.catalog_view = switch_view.unwrap();
         }
         if let Some(genre) = more {
             self.request_catalog_page(&genre);
@@ -1664,7 +1733,18 @@ impl GuiApp {
             egui::ScrollArea::vertical().id_salt("search_scroll").show(ui, |ui| {
                 let watched: HashSet<String> =
                     self.store.state.watch.keys().cloned().collect();
-                if let Some(action) = cover_cache.card_grid(ui, search_results, &watched) {
+                let mut new_eps: HashMap<String, usize> = HashMap::new();
+                for d in search_results.iter() {
+                    if let Some(rec) = self.store.state.watch.get(&d.id) {
+                        if rec.last_ep > 0 && rec.seen_total > 0 {
+                            let count: usize = d.episode_count.chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(0);
+                            if count > rec.seen_total {
+                                new_eps.insert(d.id.clone(), count - rec.seen_total);
+                            }
+                        }
+                    }
+                }
+                if let Some(action) = cover_cache.card_grid(ui, search_results, &watched, &new_eps) {
                     // 搜索结果同样支持 ▶ 直播（Play 带出详情+自动开播）
                     match action {
                         CardAction::Open(d) => open = Some(d),
@@ -1887,20 +1967,18 @@ impl GuiApp {
                         .map(|w| w.last_ep)
                         .unwrap_or(0);
                     // hero 按钮一步开播：正在播→下一集；有记录→续看；否则→第 1 集
-                    if let Some(cur_ep) = playing_here {
-                        if cur_ep < chapters.len() {
-                            if ui
-                                .add_sized(
-                                    [ui.available_width(), 34.0],
-                                    egui::widgets::Button::new(
-                                        egui::RichText::new(format!("⏭  下一集（第{}集）", cur_ep + 1))
-                                            .size(15.0),
-                                    ),
-                                )
-                                .clicked()
-                            {
-                                play_ep = Some(cur_ep + 1);
-                            }
+                    if let Some(cur_ep) = playing_here.filter(|e| *e < chapters.len()) {
+                        if ui
+                            .add_sized(
+                                [ui.available_width(), 34.0],
+                                egui::widgets::Button::new(
+                                    egui::RichText::new(format!("⏭  下一集（第{}集）", cur_ep + 1))
+                                        .size(15.0),
+                                ),
+                            )
+                            .clicked()
+                        {
+                            play_ep = Some(cur_ep + 1);
                         }
                         ui.horizontal(|ui| {
                             if ui.button(format!("▶ 重播第{}集", cur_ep)).clicked() {
@@ -2141,6 +2219,7 @@ impl CoverCache {
         ui: &mut egui::Ui,
         dramas: &[Drama],
         watched: &HashSet<String>,
+        new_eps: &HashMap<String, usize>,
     ) -> Option<CardAction> {
         if dramas.is_empty() {
             return None;
@@ -2151,7 +2230,7 @@ impl CoverCache {
             let mut picked: Option<CardAction> = None;
             ui.horizontal(|ui| {
                 for drama in row {
-                    if let Some(a) = self.card(ui, drama, watched) {
+                    if let Some(a) = self.card(ui, drama, watched, new_eps) {
                         picked = Some(a);
                     }
                 }
@@ -2168,6 +2247,7 @@ impl CoverCache {
         ui: &mut egui::Ui,
         drama: &Drama,
         watched: &HashSet<String>,
+        new_eps: &HashMap<String, usize>,
     ) -> Option<CardAction> {
         let texture = self.texture(&drama.cover);
         let mut open = false;
@@ -2196,6 +2276,21 @@ impl CoverCache {
                     label,
                     egui::FontId::proportional(12.0),
                     egui::Color32::from_gray(100),
+                );
+            }
+            // 追更角标（左上角）：看过的剧出了新集
+            if let Some(k) = new_eps.get(&drama.id) {
+                painter.rect_filled(
+                    egui::Rect::from_min_size(rect.left_top(), egui::vec2(58.0, 18.0)),
+                    3.0,
+                    egui::Color32::from_rgb(200, 60, 50),
+                );
+                painter.text(
+                    egui::Pos2::new(rect.left() + 29.0, rect.top() + 9.0),
+                    egui::Align2::CENTER_CENTER,
+                    format!("新集 +{k}"),
+                    egui::FontId::proportional(11.0),
+                    egui::Color32::WHITE,
                 );
             }
             let card = ui.interact(rect, egui::Id::new(&drama.id), egui::Sense::click());

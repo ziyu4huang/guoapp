@@ -69,6 +69,9 @@ pub struct WatchRec {
     /// 该集总长（秒，0=未知）
     #[serde(default)]
     pub dur: u64,
+    /// 上次看到该剧时的总集数——目录回传更大的值=有新集（追更提醒数据源）
+    #[serde(default)]
+    pub seen_total: usize,
 }
 
 impl WatchRec {
@@ -91,7 +94,7 @@ pub fn continue_watching(
     n: usize,
 ) -> Vec<(String, String, usize)> {
     let mut items: Vec<(&String, &WatchRec)> = watch.iter().collect();
-    items.sort_by(|a, b| b.1.updated_at.cmp(&a.1.updated_at));
+    items.sort_by_key(|(_, r)| std::cmp::Reverse(r.updated_at));
     items
         .into_iter()
         .filter(|(_, r)| !r.title.is_empty() && r.last_ep > 0)
@@ -214,8 +217,29 @@ mod watch_tests {
     use super::*;
 
     #[test]
+    fn new_episode_detection() {
+        let r = WatchRec {
+            last_ep: 3,
+            seen_total: 12,
+            ..Default::default()
+        };
+        let has_new = |ep_count: usize| ep_count > r.seen_total;
+        assert!(has_new(14), "14 > 12 应有更新");
+        assert!(!has_new(12), "12 == 12 无更新");
+        assert!(!has_new(11));
+    }
+
+    #[test]
     fn resume_start_matrix() {
-        let mut r = WatchRec { last_ep: 3, pos: 750, pos_ep: 3, dur: 1500, updated_at: 0, title: "剧".into() };
+        let mut r = WatchRec {
+            last_ep: 3,
+            pos: 750,
+            pos_ep: 3,
+            dur: 1500,
+            updated_at: 0,
+            title: "剧".into(),
+            seen_total: 12,
+        };
         // 位置屬於該集+≥5s+未到結尾 → 從 750s 續
         assert_eq!(r.resume_start(3), 750);
         // 換集 → 舊位置失效
@@ -270,5 +294,24 @@ mod watch_tests {
         assert_eq!((cs[0].index, cs[1].index), (1, 3), "必須按集號排序");
         assert!(cs[0].local);
         assert!(cs[0].video_id.ends_with("ep_001/e1.mp4"));
+    }
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::WatchRec;
+
+    #[test]
+    fn new_episode_detection() {
+        let mut r = WatchRec { last_ep: 3, seen_total: 12, ..Default::default() };
+        // 目录回传更大总集数 → 有更新 +K
+        assert_eq!(r.seen_total, 12);
+        // 语义:episode_count(目录) > seen_total → 有新集
+        let count = |r: &WatchRec, ep_count: usize| ep_count > r.seen_total;
+        assert!(count(&r, 14), "14 > 12 应有更新");
+        assert!(!count(&r, 12), "12 == 12 无更新");
+        // 记录更新后不再报
+        r.seen_total = 14;
+        assert!(!count(&r, 14));
     }
 }
