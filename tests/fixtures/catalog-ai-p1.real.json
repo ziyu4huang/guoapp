@@ -1,0 +1,1044 @@
+{
+  "BaseResp": {
+    "StatusCode": 0,
+    "StatusMessage": "SUCCESS"
+  },
+  "code": 0,
+  "data": {
+    "has_more": true,
+    "max_expand_num": 0,
+    "next_offset": 18,
+    "session_id": "2026101622292920516CB2C9974FB5EA7A",
+    "video_data": [
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":316,\"name\":\"剧情\",\"schema\":\"dragon1967://categorySearch?categoryId=316&categoryName=剧情&genreType=130&gender=0&source=detail\"},{\"category_id\":739,\"name\":\"逆袭\",\"schema\":\"dragon1967://categorySearch?categoryId=739&categoryName=逆袭&genreType=130&gender=0&source=detail\"},{\"category_id\":1,\"name\":\"都市\",\"schema\":\"dragon1967://categorySearch?categoryId=1&categoryName=都市&genreType=130&gender=0&source=detail\"}]",
+        "color_dominate": "#282028",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "广州逸趣传媒有限公司",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/bc282ed5e4da88e4673f15e0bb45f20d~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=hxgOMf6J0SHVPeBEwMDp9lyAzHY%3D",
+        "disable_play": false,
+        "duration": 3024,
+        "episode": true,
+        "episode_cnt": 68,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 1041,
+        "recommend_group_id": "7696940209044196376",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"1\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"367万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"剧情\",\"data_type\":3}]}",
+        "score": "8.6",
+        "series_id": "7696940209044196376",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "367万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "剧情",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "一姐塌房了",
+        "use_video_model": true,
+        "vertical": true,
+        "vid": "7696967726547340313",
+        "video_desc": "带货主播白莹为赚暴利，执意售卖问题化妆品，煽动网暴逼苏见微交出系统权限。苏见微设下责任切割协议，留存全套证据。白莹抵押资产卖假货东窗事发，背上六亿巨额债务，身败名裂。苏见微成立新公司，推出质检系统重塑电商行业规则，迎来新的资本对手",
+        "video_platform": 3
+      },
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":68,\"name\":\"末世\",\"schema\":\"dragon1967://categorySearch?categoryId=68&categoryName=末世&genreType=130&gender=2&source=detail\"},{\"category_id\":1,\"name\":\"都市\",\"schema\":\"dragon1967://categorySearch?categoryId=1&categoryName=都市&genreType=130&gender=2&source=detail\"}]",
+        "color_dominate": "#281010",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "羊克斯",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/de835ed64fdeda49657cf195b6fbe555~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=ixulse4yWvKXzi4xZBnFcJ9hssY%3D",
+        "disable_play": false,
+        "duration": 2177,
+        "episode": true,
+        "episode_cnt": 52,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 989,
+        "recommend_group_id": "7697215429663525950",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"2\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"315万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"末世\",\"data_type\":3}]}",
+        "score": "8.4",
+        "series_id": "7697215429663525950",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "315万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "末世",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "她体内的灾厄",
+        "use_video_model": true,
+        "vertical": false,
+        "vid": "7697260495102807065",
+        "video_desc": "最后一次战争后，旧时代没有轰然倒塌，而是在漫长岁月里自行熄灭——人们称之为寂灭。三百年后，废土遍布吞噬一切的污染兽。独来独往的女猎人石英接下一桩B级护送任务，却在残骸区误唤醒了沉睡十五年的超大型污染兽。那东西曾一夜夷平整座城市，而它还在成长。任务从B飙升至SSS，可真正让工会沉默的不是怪物——是石英举枪时，她瞳孔里闪过的另一个意识。你是谁？不记得了",
+        "video_platform": 3
+      },
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":316,\"name\":\"剧情\",\"schema\":\"dragon1967://categorySearch?categoryId=316&categoryName=剧情&genreType=130&gender=0&source=detail\"},{\"category_id\":11,\"name\":\"乡村\",\"schema\":\"dragon1967://categorySearch?categoryId=11&categoryName=乡村&genreType=130&gender=0&source=detail\"}]",
+        "color_dominate": "#302020",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "惠州剧有财传媒有限公司",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/1b5902bfe631000c424b78b558e4669d~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=o5FyK1FtdZ4ruxuWnoblwdYECY4%3D",
+        "disable_play": false,
+        "duration": 2102,
+        "episode": true,
+        "episode_cnt": 50,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 996,
+        "recommend_group_id": "7696139299791571992",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"3\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"350万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"剧情\",\"data_type\":3}]}",
+        "score": "8.4",
+        "series_id": "7696139299791571992",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "350万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "剧情",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "之别寻找恩人",
+        "use_video_model": true,
+        "vertical": true,
+        "vid": "7696233225533803545",
+        "video_desc": "讲述了一段跨越十年的温暖寻恩故事。十二岁的许清禾遭遇拐骗，危急时刻，贫苦少年陈舟挺身而出，不仅冒险救她脱险，还拿出自己的学费帮助她回家。十年后，事业有成的许清禾始终不忘救命之恩，毅然踏上寻恩之路。面对他人冒名顶替、真相被掩盖等重重波折，她坚持寻找当年的善良少年。故事以真挚情感诠释知恩图报、诚实守信、善良勇敢的传统美德，传递人间有真情、善举终有回响的正能量，让每一份善意都值得被铭记。",
+        "video_platform": 3
+      },
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":316,\"name\":\"剧情\",\"schema\":\"dragon1967://categorySearch?categoryId=316&categoryName=剧情&genreType=130&gender=1&source=detail\"},{\"category_id\":36,\"name\":\"重生\",\"schema\":\"dragon1967://categorySearch?categoryId=36&categoryName=重生&genreType=130&gender=1&source=detail\"},{\"category_id\":739,\"name\":\"逆袭\",\"schema\":\"dragon1967://categorySearch?categoryId=739&categoryName=逆袭&genreType=130&gender=1&source=detail\"},{\"category_id\":1,\"name\":\"都市\",\"schema\":\"dragon1967://categorySearch?categoryId=1&categoryName=都市&genreType=130&gender=1&source=detail\"}]",
+        "color_dominate": "#302820",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "杭州晟樊网络科技有限公司",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/ab11d268fec2c2d906685a8f557c28ca~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=a1jYwuCv02kI4flpooGkjwIzbPg%3D",
+        "disable_play": false,
+        "duration": 1980,
+        "episode": true,
+        "episode_cnt": 42,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 974,
+        "recommend_group_id": "7697212354479524888",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"4\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"308万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"剧情\",\"data_type\":3}]}",
+        "score": "8.6",
+        "series_id": "7697212354479524888",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "308万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "剧情",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "不背黑锅，再起新灶",
+        "use_video_model": true,
+        "vertical": true,
+        "vid": "7697256758821014552",
+        "video_desc": "厨师陆屿前世轻信梁薇薇，替她抚养儿子十七年，付出半生心血，却最终落得孤苦无依的下场。意外重生后，他回到被梁薇薇逼婚的那一天，决心改写命运。面对接连而来的指责与算计，陆屿逐渐发现，这场婚事背后竟隐藏着一个更大的秘密，而关键线索直指父亲留下的祖传菜谱。为了守住家传手艺，他毅然辞职，决定开创自己的餐饮事业。然而，觊觎菜谱的人仍在暗中行动。面对事业挑战与旧日纠葛，陆屿能否守住传承，真正改变自己的人生？",
+        "video_platform": 3
+      },
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":1153,\"name\":\"宫廷\",\"schema\":\"dragon1967://categorySearch?categoryId=1153&categoryName=宫廷&genreType=130&gender=0&source=detail\"},{\"category_id\":36,\"name\":\"重生\",\"schema\":\"dragon1967://categorySearch?categoryId=36&categoryName=重生&genreType=130&gender=0&source=detail\"},{\"category_id\":758,\"name\":\"古代\",\"schema\":\"dragon1967://categorySearch?categoryId=758&categoryName=古代&genreType=130&gender=0&source=detail\"}]",
+        "color_dominate": "#101018",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "成都有点鑫动传媒科技有限公司",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/fe3e1223a2b0a65e4681d3fd16c40b02~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=ABsUC9imsLkWkx87n6V5xcJJVQc%3D",
+        "disable_play": false,
+        "duration": 1532,
+        "episode": true,
+        "episode_cnt": 34,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 958,
+        "recommend_group_id": "7696882996481117208",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"5\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"328万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"宫廷\",\"data_type\":3}]}",
+        "score": "8.4",
+        "series_id": "7696882996481117208",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "328万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "宫廷",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "凤簪归砚：两世沉冤",
+        "use_video_model": true,
+        "vertical": true,
+        "vid": "7696919282378099737",
+        "video_desc": "沈昭两世困于深宫爱恨。前世她身为皇后轻信帝王萧煜，坐视忠良顾家惨遭灭门，心上人顾砚命运凄苦，自己最终惨死冷宫。重生至顾家抄家三日后，沈昭决意改写悲剧，暗中调换伪证、庇护顾氏旧部，誓要洗刷顾家冤屈。可死里逃生的顾砚被仇恨蒙蔽，加上谢令徽不断挑拨，认定沈昭是背叛者，屡次与她对立，将她打入冷宫、废黜后位。绝境下沈昭假死脱身斩断情丝。顾砚逐步勘破全部阴谋，知晓错害挚爱，满心悔恨前去赎罪。",
+        "video_platform": 3
+      },
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":316,\"name\":\"剧情\",\"schema\":\"dragon1967://categorySearch?categoryId=316&categoryName=剧情&genreType=130&gender=0&source=detail\"},{\"category_id\":1,\"name\":\"都市\",\"schema\":\"dragon1967://categorySearch?categoryId=1&categoryName=都市&genreType=130&gender=0&source=detail\"},{\"category_id\":936,\"name\":\"豪门\",\"schema\":\"dragon1967://categorySearch?categoryId=936&categoryName=豪门&genreType=130&gender=0&source=detail\"}]",
+        "color_dominate": "#181810",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "聚光漫剧",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/242b3bbd50c0344900363f9c18c5e95f~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=vUA0DUAbA00SLpp%2FfgOGaBBf84A%3D",
+        "disable_play": false,
+        "duration": 2981,
+        "episode": true,
+        "episode_cnt": 60,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 1018,
+        "recommend_group_id": "7697212335236074520",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"6\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"314万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"剧情\",\"data_type\":3}]}",
+        "score": "8.6",
+        "series_id": "7697212335236074520",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "314万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "剧情",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "富贵试人心",
+        "use_video_model": true,
+        "vertical": true,
+        "vid": "7697254898206772248",
+        "video_desc": "许家老两口坐拥3000万资产，退休前决定试探两个儿子的真心——亲生的许天海与抱养的许天赐。他们谎称公司破产、父亲脑梗，向两个儿子索要3万救命钱。亲儿子夫妇一毛不拔，却花8万8续养生年卡，甚至将父母拒之门外；养子天赐却掏空妻子生产积蓄，倾尽所有救治养父。真相揭开后，林清将全部家产转赠养子，亲儿子一家最终落得离婚、失业、无家可归。一场试探，照见了血缘与良心的真实距离",
+        "video_platform": 3
+      },
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":23,\"name\":\"种田\",\"schema\":\"dragon1967://categorySearch?categoryId=23&categoryName=种田&genreType=130&gender=2&source=detail\"},{\"category_id\":739,\"name\":\"逆袭\",\"schema\":\"dragon1967://categorySearch?categoryId=739&categoryName=逆袭&genreType=130&gender=2&source=detail\"},{\"category_id\":1,\"name\":\"都市\",\"schema\":\"dragon1967://categorySearch?categoryId=1&categoryName=都市&genreType=130&gender=2&source=detail\"}]",
+        "color_dominate": "#403810",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "惠州市惠城区阳晴文化传媒有限责任公司",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/9bd75fce73acbe74cc4c60ff15f59f74~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=v4dvJ2KfEsPDuINe4xfFlXvAfks%3D",
+        "disable_play": false,
+        "duration": 2284,
+        "episode": true,
+        "episode_cnt": 50,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 974,
+        "recommend_group_id": "7696556777550138393",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"7\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"345万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"种田\",\"data_type\":3}]}",
+        "score": "8.4",
+        "series_id": "7696556777550138393",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "345万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "种田",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "楠楠带猛兽重振动物园",
+        "use_video_model": true,
+        "vertical": true,
+        "vid": "7696624486786812990",
+        "video_desc": "许楠楠能听懂动物说话。她帮助父亲许建国经营濒临倒闭的动物园，救助胆怯东北虎招财、拒食黑熊大福、脚伤大象大贵等。父女坚持动物福利，拒绝表演与投喂，严把饲料质量，推动科普合作，最终让动物园重获生机。故事展现善良、责任与尊重动物的正向价值。",
+        "video_platform": 3
+      },
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":316,\"name\":\"剧情\",\"schema\":\"dragon1967://categorySearch?categoryId=316&categoryName=剧情&genreType=130&gender=2&source=detail\"},{\"category_id\":530,\"name\":\"热血\",\"schema\":\"dragon1967://categorySearch?categoryId=530&categoryName=热血&genreType=130&gender=2&source=detail\"}]",
+        "color_dominate": "#301008",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "苏州来娱文化传媒有限公司",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/9d05767c10d1b9aa380b9943b0a16d89~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=a84OpKmlh%2BKB8MWga2%2FjVfR9pqE%3D",
+        "disable_play": false,
+        "duration": 2523,
+        "episode": true,
+        "episode_cnt": 42,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 961,
+        "recommend_group_id": "7696882998016232472",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"8\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"318万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"剧情\",\"data_type\":3}]}",
+        "score": "8.4",
+        "series_id": "7696882998016232472",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "318万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "剧情",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "潮巷回槌",
+        "use_video_model": true,
+        "vertical": true,
+        "vid": "7696919317350206489",
+        "video_desc": "老街英歌舞队准备把排练移到升阔场地，却因一次回身碰褪发现日队形早已被简化。众人循看青砖磨痕、旧木褪握痕和手绘路线反复试练，逐步弄清绕柱、错拍与分段回中的原因。面对长袖遮挡、后排冒必成，新变化也经验证后留下并传承",
+        "video_platform": 3
+      },
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":755,\"name\":\"脑洞\",\"schema\":\"dragon1967://categorySearch?categoryId=755&categoryName=脑洞&genreType=130&gender=0&source=detail\"},{\"category_id\":37,\"name\":\"穿越\",\"schema\":\"dragon1967://categorySearch?categoryId=37&categoryName=穿越&genreType=130&gender=0&source=detail\"},{\"category_id\":19,\"name\":\"系统\",\"schema\":\"dragon1967://categorySearch?categoryId=19&categoryName=系统&genreType=130&gender=0&source=detail\"},{\"category_id\":739,\"name\":\"逆袭\",\"schema\":\"dragon1967://categorySearch?categoryId=739&categoryName=逆袭&genreType=130&gender=0&source=detail\"},{\"category_id\":79,\"name\":\"年代\",\"schema\":\"dragon1967://categorySearch?categoryId=79&categoryName=年代&genreType=130&gender=0&source=detail\"},{\"category_id\":11,\"name\":\"乡村\",\"schema\":\"dragon1967://categorySearch?categoryId=11&categoryName=乡村&genreType=130&gender=0&source=detail\"}]",
+        "color_dominate": "#482010",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "惠州市惠城区阳晴文化传媒有限责任公司",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/6837030d01f2b9ba87c56e9ea56c29e6~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=VH0rE8wnf0Tjtc62ZR4UdSTwwnA%3D",
+        "disable_play": false,
+        "duration": 4439,
+        "episode": true,
+        "episode_cnt": 66,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 1016,
+        "recommend_group_id": "7696477898043034686",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"9\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"333万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"脑洞\",\"data_type\":3}]}",
+        "score": "8.4",
+        "series_id": "7696477898043034686",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "333万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "脑洞",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "穿越六零，我靠系统当女主",
+        "use_video_model": true,
+        "vertical": true,
+        "vid": "7696512673676004377",
+        "video_desc": "现代生态农场主林秀林秀莲熬夜猝死，穿成灾年小说里180斤的恶毒女配。原主偷麦种跟人跑路，孩子快饿死，男主陈建军恨她入骨。激活穿书系统后，她往返现代与灾年时空，打脸虐渣、种田养娃、减肥逆袭，从万人嫌肥婆变成全村救星。而那个对她好感度-100的冷面男主，竟第一个沦陷，将她宠上天。",
+        "video_platform": 3
+      },
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":316,\"name\":\"剧情\",\"schema\":\"dragon1967://categorySearch?categoryId=316&categoryName=剧情&genreType=130&gender=1&source=detail\"},{\"category_id\":739,\"name\":\"逆袭\",\"schema\":\"dragon1967://categorySearch?categoryId=739&categoryName=逆袭&genreType=130&gender=1&source=detail\"},{\"category_id\":1,\"name\":\"都市\",\"schema\":\"dragon1967://categorySearch?categoryId=1&categoryName=都市&genreType=130&gender=1&source=detail\"},{\"category_id\":127,\"name\":\"职场\",\"schema\":\"dragon1967://categorySearch?categoryId=127&categoryName=职场&genreType=130&gender=1&source=detail\"}]",
+        "color_dominate": "#202028",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "碧落羲和",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/a80c7638e13a853c8d94f4a75cf245d8~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=mzwTPwDMcRR1SyhvosGA453CqY4%3D",
+        "disable_play": false,
+        "duration": 2852,
+        "episode": true,
+        "episode_cnt": 53,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 1001,
+        "recommend_group_id": "7696912375072427032",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"10\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"366万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"剧情\",\"data_type\":3}]}",
+        "score": "8.5",
+        "series_id": "7696912375072427032",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "366万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "剧情",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "我离职后公司崩了",
+        "use_video_model": true,
+        "vertical": true,
+        "vid": "7696946821934894142",
+        "video_desc": "陈实在老公司勤恳奋斗，拼尽全力拿下重大项目，却遭遇不公对待，劳动成果被他人侵占。他毅然选择离开，凭借自身过硬的业务本领迎来全新机遇。旧企业接连出现经营失误逐步走向衰败。陈实始终坚守本心，不谋算计，依靠真实实力重新收获事业成功。",
+        "video_platform": 3
+      },
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":316,\"name\":\"剧情\",\"schema\":\"dragon1967://categorySearch?categoryId=316&categoryName=剧情&genreType=130&gender=0&source=detail\"},{\"category_id\":36,\"name\":\"重生\",\"schema\":\"dragon1967://categorySearch?categoryId=36&categoryName=重生&genreType=130&gender=0&source=detail\"},{\"category_id\":739,\"name\":\"逆袭\",\"schema\":\"dragon1967://categorySearch?categoryId=739&categoryName=逆袭&genreType=130&gender=0&source=detail\"},{\"category_id\":79,\"name\":\"年代\",\"schema\":\"dragon1967://categorySearch?categoryId=79&categoryName=年代&genreType=130&gender=0&source=detail\"},{\"category_id\":11,\"name\":\"乡村\",\"schema\":\"dragon1967://categorySearch?categoryId=11&categoryName=乡村&genreType=130&gender=0&source=detail\"}]",
+        "color_dominate": "#382020",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "书旗",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/a4c6cb33238d86dd53958c024a2c5012~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=a1mbVs56O6onHn%2FLd4eG7b8atok%3D",
+        "disable_play": false,
+        "duration": 4394,
+        "episode": true,
+        "episode_cnt": 72,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 1045,
+        "recommend_group_id": "7697203063353773081",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"11\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"351万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"剧情\",\"data_type\":3}]}",
+        "score": "8.6",
+        "series_id": "7697203063353773081",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "351万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "剧情",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "重生八零丁老太虐翻全场",
+        "use_video_model": true,
+        "vertical": true,
+        "vid": "7697240749326208062",
+        "video_desc": "丁兰八十岁被三个儿子丢在路边，死在捡垃圾的小女儿怀里。重生回1985年，48岁的她决定不再当软柿子——不孝儿孙一个个收拾，负心老公当场清算，伪善“大师”直接送官。这一世她谁也不惯，只宠一个人，前世唯一捡她回家的小女儿。重生复仇，丁老太虐翻全场。",
+        "video_platform": 3
+      },
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":316,\"name\":\"剧情\",\"schema\":\"dragon1967://categorySearch?categoryId=316&categoryName=剧情&genreType=130&gender=1&source=detail\"},{\"category_id\":756,\"name\":\"反转\",\"schema\":\"dragon1967://categorySearch?categoryId=756&categoryName=反转&genreType=130&gender=1&source=detail\"},{\"category_id\":1,\"name\":\"都市\",\"schema\":\"dragon1967://categorySearch?categoryId=1&categoryName=都市&genreType=130&gender=1&source=detail\"},{\"category_id\":936,\"name\":\"豪门\",\"schema\":\"dragon1967://categorySearch?categoryId=936&categoryName=豪门&genreType=130&gender=1&source=detail\"}]",
+        "color_dominate": "#181818",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "长沙迈尚文化传媒有限公司",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/fe274eee991c0a1ea9f08ed4707aa20b~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=ggl6skNs7QB6aZR6uJGOQBwFK4c%3D",
+        "disable_play": false,
+        "duration": 4601,
+        "episode": true,
+        "episode_cnt": 60,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 985,
+        "recommend_group_id": "7696952573198093337",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"12\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"312万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"剧情\",\"data_type\":3}]}",
+        "score": "8.4",
+        "series_id": "7696952573198093337",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "312万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "剧情",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "玉兰归序",
+        "use_video_model": true,
+        "vertical": true,
+        "vid": "7696972207599143961",
+        "video_desc": "陆承渊常驻欧洲，多年来一味顺从母亲。妻子温岚嫁入陆家二十五年，一直备受婆婆程慧芳的苛待。女儿陆知夏隐瞒身份，在财务部查出异常咨询费的端倪，却遭人报复受伤，温岚为护女儿也受了伤。陆承渊回国后幡然醒悟，拒绝离婚，全力护住妻女，查明背后真相，牵出周振邦图谋股权的隐情。最终阴谋被揭穿，违法之人受到法律制裁，温岚重开绣坊，凭非遗手艺再创佳绩，一家人冰释前嫌、重归于好。",
+        "video_platform": 3
+      },
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":316,\"name\":\"剧情\",\"schema\":\"dragon1967://categorySearch?categoryId=316&categoryName=剧情&genreType=130&gender=1&source=detail\"},{\"category_id\":1,\"name\":\"都市\",\"schema\":\"dragon1967://categorySearch?categoryId=1&categoryName=都市&genreType=130&gender=1&source=detail\"}]",
+        "color_dominate": "#102838",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "贝塔文化",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/893aeeb0d59a9c5788dd5e254fddbd08~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=XGMp9han3byNfzPdhnqbH5Mmhf4%3D",
+        "disable_play": false,
+        "duration": 4177,
+        "episode": true,
+        "episode_cnt": 82,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 966,
+        "recommend_group_id": "7696137751858531353",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"13\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"316万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"剧情\",\"data_type\":3}]}",
+        "score": "8.4",
+        "series_id": "7696137751858531353",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "316万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "剧情",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "翻译官揭穿的真相",
+        "use_video_model": true,
+        "vertical": true,
+        "vid": "7696231217808542782",
+        "video_desc": "看似是居家翻译的普通丈夫沈砚舟，早已看穿妻子苏晚晴赴法工作的谎言，识破她与外企高管的隐秘纠葛。他不动声色换掉妻子的药片，以六个月为期验证真心。苏晚晴的冷漠疏离、小舅子一家的肆意索取，让他彻底心寒。他暗中拟定离婚协议，清算三年虚假婚姻，隐忍布局，静待这场感情博弈的最终结局。",
+        "video_platform": 3
+      },
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":316,\"name\":\"剧情\",\"schema\":\"dragon1967://categorySearch?categoryId=316&categoryName=剧情&genreType=130&gender=0&source=detail\"},{\"category_id\":739,\"name\":\"逆袭\",\"schema\":\"dragon1967://categorySearch?categoryId=739&categoryName=逆袭&genreType=130&gender=0&source=detail\"},{\"category_id\":758,\"name\":\"古代\",\"schema\":\"dragon1967://categorySearch?categoryId=758&categoryName=古代&genreType=130&gender=0&source=detail\"}]",
+        "color_dominate": "#383028",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "成都星曜漫娱科技有限公司",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/a6351c6c57cf1cd85eed09c5b938707c~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=ykkdyREkANHIqw7gCym45S71HoU%3D",
+        "disable_play": false,
+        "duration": 1766,
+        "episode": true,
+        "episode_cnt": 33,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 1047,
+        "recommend_group_id": "7696409863550667801",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"14\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"372万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"剧情\",\"data_type\":3}]}",
+        "score": "8.4",
+        "series_id": "7696409863550667801",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "372万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "剧情",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "布坊小东家",
+        "use_video_model": true,
+        "vertical": true,
+        "vid": "7696421583652391961",
+        "video_desc": "老东家亡故，沈家布坊陷入家业纷争。精通织布、识料、管账的继女沈清禾，一心守护父亲心血，却遭继母柳氏觊觎算计。柳氏掐断棉纱货源、散播谣言、收买仆役、抄袭花布，步步图谋夺取布坊。身陷绝境的沈清禾另辟蹊径，下乡收购土棉纱，结识擅长草木染的谢砚舟，二人携手合作。面对货源封锁、名誉损毁、货运遭毁等重重刁难，她不搞报复，凭人证物证，借族老与商户评议化解危机，给对手留悔改余地。风波平息，沈清禾保住布坊，",
+        "video_platform": 3
+      },
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":527,\"name\":\"恋爱\",\"schema\":\"dragon1967://categorySearch?categoryId=527&categoryName=恋爱&genreType=130&gender=0&source=detail\"},{\"category_id\":739,\"name\":\"逆袭\",\"schema\":\"dragon1967://categorySearch?categoryId=739&categoryName=逆袭&genreType=130&gender=0&source=detail\"},{\"category_id\":1,\"name\":\"都市\",\"schema\":\"dragon1967://categorySearch?categoryId=1&categoryName=都市&genreType=130&gender=0&source=detail\"},{\"category_id\":936,\"name\":\"豪门\",\"schema\":\"dragon1967://categorySearch?categoryId=936&categoryName=豪门&genreType=130&gender=0&source=detail\"}]",
+        "color_dominate": "#181818",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "舒克文化",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/1c786c88c9b6754e2b3b7e7d4dbd9c9e~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=VoYZTe2yqA%2Bge00bZPyR2pJ%2Buwk%3D",
+        "disable_play": false,
+        "duration": 3037,
+        "episode": true,
+        "episode_cnt": 49,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 1048,
+        "recommend_group_id": "7696131600848800793",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"15\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"392万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"恋爱\",\"data_type\":3}]}",
+        "score": "8.6",
+        "series_id": "7696131600848800793",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "392万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "恋爱",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "除夕夜一别，此后万丈光芒",
+        "use_video_model": true,
+        "vertical": true,
+        "vid": "7696222954408922136",
+        "video_desc": "天才珠宝设计师许知漾，在孕期遭遇丈夫陆则衍与骆穗柠的背叛，收下一亿补偿果断离婚，隐去本名，以设计师Elowen的身份接单谋生。骆穗柠依仗陆太太身份，高价签下Elowen的设计，暗中却打算盗用她的作品署上自己的名字。一笔十亿订单拉开博弈序幕。许知漾意外结识神秘邻居温景屹，他竟早早珍藏着Elowen所有手稿。当陆则衍得知孩子早已逝去，彻底崩溃，不惜以极端方式纠缠。",
+        "video_platform": 3
+      },
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":527,\"name\":\"恋爱\",\"schema\":\"dragon1967://categorySearch?categoryId=527&categoryName=恋爱&genreType=130&gender=0&source=detail\"},{\"category_id\":739,\"name\":\"逆袭\",\"schema\":\"dragon1967://categorySearch?categoryId=739&categoryName=逆袭&genreType=130&gender=0&source=detail\"},{\"category_id\":1,\"name\":\"都市\",\"schema\":\"dragon1967://categorySearch?categoryId=1&categoryName=都市&genreType=130&gender=0&source=detail\"},{\"category_id\":127,\"name\":\"职场\",\"schema\":\"dragon1967://categorySearch?categoryId=127&categoryName=职场&genreType=130&gender=0&source=detail\"}]",
+        "color_dominate": "#081020",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "直率奶茶njXO0",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/c2bf3424c2167394f45679c240506272~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=qjQ6QezTfCU08L%2FB8cJjtZoPfSw%3D",
+        "disable_play": false,
+        "duration": 1212,
+        "episode": true,
+        "episode_cnt": 25,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 1008,
+        "recommend_group_id": "7696488729803754520",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"16\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"376万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"恋爱\",\"data_type\":3}]}",
+        "score": "8.5",
+        "series_id": "7696488729803754520",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "376万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "恋爱",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "归程有期",
+        "use_video_model": true,
+        "vertical": true,
+        "vid": "7696542785616235545",
+        "video_desc": "林婉与陆远舟曾在彼此人生中留下深刻印记。多年后，两人因工作与生活轨迹重新靠近，从陌生的客气开始，逐渐重新认识对方。旧日误会与现实问题接踵而至，林婉在独立事业与情感选择之间徘徊，陆远舟也开始正视自己曾经的遗憾。经历波折后，两人学会理解、信任与改变，最终选择一起面对未来。",
+        "video_platform": 3
+      },
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":755,\"name\":\"脑洞\",\"schema\":\"dragon1967://categorySearch?categoryId=755&categoryName=脑洞&genreType=130&gender=1&source=detail\"},{\"category_id\":1,\"name\":\"都市\",\"schema\":\"dragon1967://categorySearch?categoryId=1&categoryName=都市&genreType=130&gender=1&source=detail\"}]",
+        "color_dominate": "#102038",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "苏州来娱文化传媒有限公司",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/45eec6ee95bc2abc19311df9bcc8fcd7~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=RhYsVKWNb7aRSSkUcMK96JXE0tI%3D",
+        "disable_play": false,
+        "duration": 1202,
+        "episode": true,
+        "episode_cnt": 20,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 1020,
+        "recommend_group_id": "7696408327739149336",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"17\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"346万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"脑洞\",\"data_type\":3}]}",
+        "score": "8.5",
+        "series_id": "7696408327739149336",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "346万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "脑洞",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "全城路灯都在告状",
+        "use_video_model": true,
+        "vertical": true,
+        "vid": "7696419941863394328",
+        "video_desc": "马德彪是市政路灯维修工，某天突然听见路灯开口说话。13号灯告诉他一个秘密；全城十二万盏路灯都是监视器，有人在通过灯光收集所有人的秘密。他遇上政务热线话务员吴桂芬，两人发现新碑即将完成“清除名单”。师父赵铁柱牺牲自己变成“总台”，杂货铺老板娘钱多多揭示自己是灵脉守护者。七块子碑、三盏老灯、灯心与言灵——马德彪必须在三天内集齐力量，对抗碑灵周文斌，否则全城路灯将永久熄灭。",
+        "video_platform": 3
+      },
+      {
+        "book_exist": false,
+        "category_schema": "[{\"category_id\":23,\"name\":\"种田\",\"schema\":\"dragon1967://categorySearch?categoryId=23&categoryName=种田&genreType=130&gender=2&source=detail\"},{\"category_id\":11,\"name\":\"乡村\",\"schema\":\"dragon1967://categorySearch?categoryId=11&categoryName=乡村&genreType=130&gender=2&source=detail\"}]",
+        "color_dominate": "#404828",
+        "comment_count": 0,
+        "content_type": 1004,
+        "copyright": "重庆飞途鸿盈文化传媒有限公司",
+        "cover": "https://p3-reading-sign.fqnovelpic.com/novel-pic/8c1d1f625c1adf7fed20ceea13bf2fa1~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=64477e16&x-expires=1797344970&x-signature=x6JHHo%2BfiwGB3Ys9uky9kLE7AIk%3D",
+        "disable_play": false,
+        "duration": 2676,
+        "episode": true,
+        "episode_cnt": 42,
+        "horiz_cover": "",
+        "pay_info": {
+          "pay_type": 0
+        },
+        "play_cnt": 1039,
+        "recommend_group_id": "7696408326204050456",
+        "recommend_info": "{\"channel_id\":\"94349633554\",\"request_id\":\"2026101622292920516CB2C9974FB5EA7A\",\"rank\":\"18\"}",
+        "recommend_reason_list": "{\"tag_info\":{\"text\":\"新剧\",\"bg_color\":[\"#00AE83\"],\"dark_bg_color\":[\"#008060\"],\"position\":2,\"is_align_to_edge\":false},\"sub_title_list\":[{\"content\":\"349万\",\"data_type\":27,\"rec_icon_url\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png\",\"rec_icon_url_dark\":\"https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png\"},{\"content\":\"种田\",\"data_type\":3}]}",
+        "score": "8.6",
+        "series_id": "7696408326204050456",
+        "sub_title_list": [
+          {
+            "can_click": false,
+            "content": "349万",
+            "data_type": 27,
+            "highlight": false,
+            "rec_icon_url": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_icon.png",
+            "rec_icon_url_dark": "https://lf3-reading.fqnovelstatic.com/obj/novel-common/img_hot_value_flame_dark_icon.png"
+          },
+          {
+            "can_click": false,
+            "content": "种田",
+            "data_type": 3,
+            "highlight": false
+          }
+        ],
+        "support_listen": true,
+        "tag_info": {
+          "bg_color": [
+            "#00AE83"
+          ],
+          "dark_bg_color": [
+            "#008060"
+          ],
+          "is_align_to_edge": false,
+          "position": 2,
+          "text": "新剧"
+        },
+        "title": "棚间新路",
+        "use_video_model": true,
+        "vertical": true,
+        "vid": "7696419872921619480",
+        "video_desc": "大棚蔬菜成熟节奏不一，过去一次采、一车卖常造成混级和损耗。返乡青年带着种植户从分批采收、规格分级、称重记录到包装运输逐步建立标准，并通过直播、社区和采购渠道测试小批供货。随着复购和订单趋稳，大家不再追求一季清空，而是按真实需求安排生产，为下一季留下更清楚、更长久的增收办法。",
+        "video_platform": 3
+      }
+    ]
+  },
+  "debug_info": "",
+  "log_id": "2026101622292920516CB2C9974FB5EA7A",
+  "message": "SUCCESS"
+}

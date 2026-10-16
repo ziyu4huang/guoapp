@@ -166,7 +166,10 @@ Cookie 值永不打印到日志/输出（一律脱敏显示），只落本机数
 
 ```sh
 cargo build --release     # target/release/{guo, guo-gui}（CLI + GUI）
-cargo test                # 7 项单元测试
+cargo test                # 单元测试（无网络）
+# GUI/端到端套件（hermetic：目录/详情/搜索/封面/媒体全走本地 fixture 伺服器，
+# 上游再怎么改都不影响测试；需 mpv + ffmpeg）：
+cargo test --test gui_harness --test record_gif --test screenshots -- --ignored
 ```
 
 依赖仅：ureq、serde/serde_json、md-5、sha2、hex、aes、cbc、base64、url，

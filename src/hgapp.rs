@@ -11,6 +11,23 @@ use std::time::Duration;
 
 pub const APP_BASE: &str = "https://api5-normal-sinfonlineb.fqnovel.com";
 pub const WEB_BASE: &str = "https://hongguoduanju.com";
+
+/// 取数基址覆写（`GUO_APP_BASE`/`GUO_WEB_BASE`；默认正典上游）。
+/// hermetic 测试以本地 fixture 伺服器顶替上游，与第三方可用性彻底脱钩；
+/// 平时留空即走正典，不读环境变量以外的任何状态。
+pub fn app_base() -> String {
+    match std::env::var("GUO_APP_BASE") {
+        Ok(v) if !v.trim().is_empty() => v.trim().trim_end_matches('/').to_string(),
+        _ => APP_BASE.to_string(),
+    }
+}
+
+pub fn web_base() -> String {
+    match std::env::var("GUO_WEB_BASE") {
+        Ok(v) if !v.trim().is_empty() => v.trim().trim_end_matches('/').to_string(),
+        _ => WEB_BASE.to_string(),
+    }
+}
 const APP_UA: &str = "com.phoenix.read/73532 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)";
 pub const WEB_UA: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Mobile/15E148 Safari/604.1";
 
@@ -107,7 +124,7 @@ impl HgClient {
             (millis / 1000) as u32,
             millis,
         );
-        let url = format!("{}{}?{}", APP_BASE, path, query_string);
+        let url = format!("{}{}?{}", app_base(), path, query_string);
         let mut request = self
             .agent
             .post(&url)

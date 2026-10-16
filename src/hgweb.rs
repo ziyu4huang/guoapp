@@ -2,7 +2,7 @@
 //! the page provides catalog / detail / player / search data without the app
 //! signing. Mirrors provider_hongguo web paths.
 
-use crate::hgapp::{drama_from_value, media_addresses, HgClient, WEB_BASE, WEB_UA};
+use crate::hgapp::{drama_from_value, media_addresses, web_base, HgClient, WEB_BASE, WEB_UA};
 use crate::jsonx::{jbool, jlist, jmap, jnum_str, jstr};
 use crate::model::{is_numeric_id, Chapter, Drama, Media, Variant};
 use serde_json::Value;
@@ -90,7 +90,7 @@ impl HgClient {
         let mut pages = max_pages.max(1);
         let mut page = 1;
         while page <= pages {
-            let body = self.fetch_page(&format!("{}/category/{}?page={}", WEB_BASE, route, page))?;
+            let body = self.fetch_page(&format!("{}/category/{}?page={}", web_base(), route, page))?;
             let data = parse_router_data(&body).ok_or("红果分类数据不可用")?;
             let loader =
                 loader_map(&data, &["category_page", "category_$"]).ok_or("红果分类数据不可用")?;
@@ -128,7 +128,7 @@ impl HgClient {
     pub fn web_detail(&self, series_id: &str) -> Result<(String, Vec<Chapter>), String> {
         let body = self.fetch_page(&format!(
             "{}/detail?series_id={}",
-            WEB_BASE,
+            web_base(),
             urlencode(series_id)
         ))?;
         let data = parse_router_data(&body).ok_or("hongguo detail is empty")?;
@@ -181,7 +181,7 @@ impl HgClient {
     ) -> Result<Media, String> {
         let page_url = format!(
             "{}/player/{}/{}/",
-            WEB_BASE,
+            web_base(),
             urlencode(series_id),
             urlencode(video_id)
         );
@@ -218,7 +218,7 @@ impl HgClient {
 
     /// Web search page.
     pub fn web_search(&self, keyword: &str) -> Result<(Vec<Drama>, i64), String> {
-        let body = self.fetch_page(&format!("{}/search/{}", WEB_BASE, urlencode(keyword)))?;
+        let body = self.fetch_page(&format!("{}/search/{}", web_base(), urlencode(keyword)))?;
         let data = parse_router_data(&body).ok_or("红果搜索未返回有效结果")?;
         let page = loader_map(&data, &["search_(keyword)/page", "search_"])
             .ok_or("红果搜索未返回有效结果")?;
@@ -252,7 +252,7 @@ impl HgClient {
     pub fn suggestions(&self, query: &str, count: usize) -> Result<Vec<Value>, String> {
         let url = format!(
             "{}/incent_resource/suggestion?app_id=8662&query={}&count={}",
-            WEB_BASE,
+            web_base(),
             urlencode(query),
             count
         );

@@ -1,6 +1,10 @@
-//! 无头 GUI 交互测试：真实网络 + 真实 egui 渲染，覆盖
+//! 无头 GUI 交互测试：hermetic 全脱钩 + 真实 egui 渲染，覆盖
 //! 目录加载 → 搜索 → 详情选集 → 下载 → 片库更新 全链路。
+//! 网络(目录/详情/搜索/封面/媒体)全部走 tests/common 的本地 fixture 伺服器
+//! ——上游(红果)再怎么改都不影响本套件。
 //! 运行：cargo test --test gui_harness -- --ignored --nocapture
+
+mod common;
 
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
@@ -37,74 +41,6 @@ fn pump_until(harness: &mut H, secs: u64, mut ready: impl FnMut(&mut H) -> bool)
         std::thread::sleep(std::time::Duration::from_millis(250));
     }
     panic!("pump_until: condition not met within {}s", secs);
-}
-
-
-/// 隔离测试媒体源:本地 Range 伺服器(serve 一段伪随机字节,支援 Range 续传)。
-/// 配合 GUO_RESOLVE_OVERRIDE=返回的 URL,让串流测试与上游可用性彻底脱钩
-/// (INC-20261015 上游锁定后,所有真网播放测试都会假红)。
-fn hermetic_media() -> String {
-    use std::io::{Read, Write};
-    let body: Vec<u8> = (0..2_000_000u32).map(|i| (i % 251) as u8).collect();
-    let body = std::sync::Arc::new(body);
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { continue };
-            let body = body.clone();
-            std::thread::spawn(move || {
-                let mut buf = Vec::new();
-                let mut one = [0u8; 1];
-                loop {
-                    let n = stream.read(&mut one).unwrap_or(0);
-                    if n == 0 || buf.len() > 16384 {
-                        return;
-                    }
-                    buf.extend_from_slice(&one[..n]);
-                    if buf.ends_with(b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                let request = String::from_utf8_lossy(&buf).to_string();
-                let total = body.len();
-                let range = request
-                    .lines()
-                    .find_map(|l| l.strip_prefix("Range: bytes="))
-                    .map(|s| s.trim().trim_start_matches("bytes=").to_string());
-                let (status, extra, slice): (&str, String, &[u8]) = match range.as_deref() {
-                    Some(spec) => {
-                        let mut it = spec.splitn(2, '-');
-                        let s: usize = it.next().unwrap_or("").trim().parse().unwrap_or(0);
-                        let e: usize = it
-                            .next()
-                            .unwrap_or("")
-                            .trim()
-                            .parse::<usize>()
-                            .map(|v| (v + 1).min(total))
-                            .unwrap_or(total);
-                        if s < e && e <= total {
-                            (
-                                "206 Partial Content",
-                                format!("Content-Range: bytes {}-{}/{}\r\n", s, e - 1, total),
-                                &body[s..e],
-                            )
-                        } else {
-                            ("200 OK", String::new(), &body[..])
-                        }
-                    }
-                    None => ("200 OK", String::new(), &body[..]),
-                };
-                let head = format!(
-                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n",
-                    slice.len()
-                );
-                let _ = stream.write_all(head.as_bytes());
-                let _ = stream.write_all(slice);
-            });
-        }
-    });
-    format!("http://127.0.0.1:{port}/sample.mp4")
 }
 
 
@@ -153,6 +89,7 @@ fn save_png(harness: &mut H, name: &str) {
 #[test]
 #[ignore]
 fn catalog_load_more_grows() {
+    common::hermetic().install();
     std::env::set_var("GUOAPP_DATA", temp_data_dir());
     let mut harness: H = Harness::builder()
         .with_size(egui::vec2(1180.0, 760.0))
@@ -204,8 +141,7 @@ fn catalog_load_more_grows() {
 #[test]
 #[ignore]
 fn gui_full_flow() {
-    // 下载链路走本地媒体源(hermetic):上游锁定(INC-20261015)后真网下载不可用
-    std::env::set_var("GUO_RESOLVE_OVERRIDE", hermetic_media());
+    common::hermetic().install();
     std::env::set_var("GUOAPP_DATA", temp_data_dir());
     let mut harness: H = Harness::builder()
         .with_size(egui::vec2(1180.0, 760.0))
@@ -320,7 +256,7 @@ fn gui_full_flow() {
 #[ignore]
 fn episode_cell_semantics() {
     std::env::set_var("GUO_MPV_ARGS", "--vo=null --ao=null");
-    std::env::set_var("GUO_RESOLVE_OVERRIDE", hermetic_media());
+    common::hermetic().install();
     std::env::set_var("GUOAPP_DATA", temp_data_dir());
     let mut harness: H = Harness::builder()
         .with_size(egui::vec2(1180.0, 760.0))
@@ -381,7 +317,7 @@ fn episode_cell_semantics() {
 #[ignore]
 fn watch_survives_detail_close() {
     std::env::set_var("GUO_MPV_ARGS", "--vo=null --ao=null");
-    std::env::set_var("GUO_RESOLVE_OVERRIDE", hermetic_media());
+    common::hermetic().install();
     std::env::set_var("GUOAPP_DATA", temp_data_dir());
     let mut harness: H = Harness::builder()
         .with_size(egui::vec2(1180.0, 760.0))

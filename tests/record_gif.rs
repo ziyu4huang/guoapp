@@ -1,78 +1,16 @@
-//! 录制 README 演示 GIF 的帧序列：真实网络 + 真实操作
+//! 录制 README 演示 GIF 的帧序列：hermetic 全脱钩 + 真实操作
 //! （封面载入 → 点「更多AI剧」清单变长 → 点卡片开详情 → 下载进度 → 完成 ▶）。
+//! 网络(目录/详情/搜索/封面/媒体)全部走 tests/common 本地 fixture 伺服器；
 //! 输出 $GUO_GIF_DIR 下 f0001.png…，再用 ffmpeg 调色板法组 GIF。
 //! 运行：cargo test --test record_gif -- --ignored --nocapture
+
+mod common;
 
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 
 type App = guo::gui::GuiApp;
 type H<'a> = Harness<'a, App>;
-
-/// 隔离测试媒体源:本地 Range 伺服器(配合 GUO_RESOLVE_OVERRIDE,與上游脫鉤)。
-fn hermetic_media() -> String {
-    use std::io::{Read, Write};
-    let body: std::sync::Arc<Vec<u8>> =
-        std::sync::Arc::new((0..2_000_000u32).map(|i| (i % 251) as u8).collect());
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { continue };
-            let body = body.clone();
-            std::thread::spawn(move || {
-                let mut buf = Vec::new();
-                let mut one = [0u8; 1];
-                loop {
-                    let n = stream.read(&mut one).unwrap_or(0);
-                    if n == 0 || buf.len() > 16384 {
-                        return;
-                    }
-                    buf.extend_from_slice(&one[..n]);
-                    if buf.ends_with(b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                let request = String::from_utf8_lossy(&buf).to_string();
-                let total = body.len();
-                let range = request
-                    .lines()
-                    .find_map(|l| l.strip_prefix("Range: bytes="))
-                    .map(|s| s.trim().trim_start_matches("bytes=").to_string());
-                let (status, extra, slice): (&str, String, &[u8]) = match range.as_deref() {
-                    Some(spec) => {
-                        let mut it = spec.splitn(2, '-');
-                        let s: usize = it.next().unwrap_or("").trim().parse().unwrap_or(0);
-                        let e: usize = it
-                            .next()
-                            .unwrap_or("")
-                            .trim()
-                            .parse::<usize>()
-                            .map(|v| (v + 1).min(total))
-                            .unwrap_or(total);
-                        if s < e && e <= total {
-                            (
-                                "206 Partial Content",
-                                format!("Content-Range: bytes {}-{}/{}\r\n", s, e - 1, total),
-                                &body[s..e],
-                            )
-                        } else {
-                            ("200 OK", String::new(), &body[..])
-                        }
-                    }
-                    None => ("200 OK", String::new(), &body[..]),
-                };
-                let head = format!(
-                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n",
-                    slice.len()
-                );
-                let _ = stream.write_all(head.as_bytes());
-                let _ = stream.write_all(slice);
-            });
-        }
-    });
-    format!("http://127.0.0.1:{port}/sample.mp4")
-}
 
 fn temp_data_dir() -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -199,8 +137,7 @@ fn first_card(harness: &mut H) -> String {
 #[test]
 #[ignore]
 fn record_demo_gif() {
-    // 下载链路 hermetic(上游锁定后真网下载不可用)
-    std::env::set_var("GUO_RESOLVE_OVERRIDE", hermetic_media());
+    common::hermetic().install();
     let out = gif_dir();
     let _ = std::fs::remove_dir_all(&out);
     std::env::set_var("GUOAPP_DATA", temp_data_dir());
@@ -277,31 +214,44 @@ fn record_demo_gif() {
     eprintln!("frames: {} → {}", rec.n, rec.dir.display());
 }
 
-/// IPC 单实例播放会话端到端实测（真实串流，无头渲染）：
-/// launch → 第一集 start-file → loadfile 换第二集 → end-file 事件 → quit。
+/// IPC 单实例播放会话端到端实测（hermetic：本地**真 ffmpeg 片**直接构造
+/// PlayItem——伪随机字节 demux 不了；无头 --vo=null）：
+/// launch → time-pos≥1（真在播的机械证据；file-loaded 有早于读者连线的
+/// race，eof 测试实录）→ loadfile 换第二集 → Replaced + file-loaded → quit。
+/// **env 纪律**：本测试不碰 GUO_RESOLVE_OVERRIDE（process-global，中段改写
+/// 会串染并行测试的下载路径=record_demo_gif 假败实录），只读 install() 的值。
 /// 运行：cargo test --test record_gif ipc_session_live -- --ignored --nocapture
 #[test]
 #[ignore]
 fn ipc_session_live() {
     use guo::player::{self, PlayItem, PlayerEvent};
 
-    let store = guo::state::Store::load();
-    let client = guo::hgapp::HgClient::new();
-    let drama_id = "hongguo:7694857999663238168";
-    let (_, chapters) = guo::hgapp::detail_with_fallback(&client, &store, drama_id)
-        .expect("detail");
-    assert!(chapters.len() >= 2, "测试剧目需要至少 2 集");
-
-    let resolve = |ep: usize| {
-        let ch = chapters.iter().find(|c| c.index == ep).unwrap();
-        guo::media::try_resolve_media(&client, &store, "7694857999663238168", &ch.video_id)
-            .expect("resolve")
+    std::env::set_var("GUO_MPV_ARGS", "--vo=null --ao=null");
+    let dir = std::env::temp_dir().join(format!("guo-ipc-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("tmp dir");
+    // 20s 片：一次性会话 eof 即退出——换集必须在播中打（2s 片实录=eof 后
+    // loadfile 打进已退出进程 EINVAL）
+    let clip = |name: &str| {
+        let p = dir.join(name);
+        let st = std::process::Command::new("ffmpeg")
+            .args([
+                "-y", "-loglevel", "error",
+                "-f", "lavfi", "-i", "color=c=red:s=320x240:d=20",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=20",
+                "-pix_fmt", "yuv420p", "-shortest", "-c:v", "libx264",
+            ])
+            .arg(&p)
+            .status()
+            .expect("ffmpeg");
+        assert!(st.success());
+        p
     };
-    let m1 = resolve(1);
-    let item = |m: &guo::model::Media, ep: usize| PlayItem {
-        url: m.url.clone(),
-        referer: m.referer.clone(),
-        key: m.cenc_key.as_ref().map(hex::encode),
+    let ep1 = clip("ipc_ep1.mp4");
+    let ep2 = clip("ipc_ep2.mp4");
+    let item = |p: &std::path::Path, ep: usize| PlayItem {
+        url: p.display().to_string(),
+        referer: String::new(),
+        key: None,
         title: format!("《世子爷他要以身相许》第{}集", ep),
         start: 0,
     };
@@ -309,19 +259,19 @@ fn ipc_session_live() {
     let (kind, program) = player::resolve_player();
     assert_eq!(kind, player::PlayerKind::Mpv, "本机应走 mpv（无 IINA）");
     let ipc = player::ipc_path();
-    let log = store.dir.join("mpv-test.log");
+    let log = dir.join("mpv-test.log");
     eprintln!("step1: launch");
     let mut session = player::PlayerSession::launch(
         kind,
         &program,
-        &item(&m1, 1),
+        &item(&ep1, 1),
         &ipc,
         &log,
         false,
         &Default::default(),
     )
         .expect("launch mpv");
-    eprintln!("step2: session up, wait file-loaded");
+    eprintln!("step2: session up, wait first episode playing");
 
     let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
     let (ev_tx, ev_rx) = std::sync::mpsc::channel();
@@ -331,24 +281,25 @@ fn ipc_session_live() {
         player::event_loop(&ev_ipc, &ev_running, move |ev| ev_tx.send(ev).is_ok())
     });
 
-    // 等 IPC 就绪 + 第一集开播（headless 下 start-file 事件即视为在播）
+    // 第一集证据=time-pos 推进到 ≥1s（property 可读且增长=真解码真播放；
+    // file-loaded 有早于读者连线的 race，播放位置是更硬的证据）
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    let mut started = false;
+    let mut playing = false;
     while std::time::Instant::now() < deadline {
-        if let Ok(ev) = ev_rx.recv_timeout(std::time::Duration::from_millis(500)) {
-            if ev == PlayerEvent::FileLoaded {
-                started = true;
-                break;
-            }
+        if player::get_property_u64(session.ipc.as_path(), "time-pos")
+            .is_some_and(|t| t >= 1)
+        {
+            playing = true;
+            break;
         }
+        assert!(session.process_alive(), "第一集播放中进程退出（本地片未真播放）");
+        std::thread::sleep(std::time::Duration::from_millis(200));
     }
-    assert!(started, "30s 内未收到 file-loaded（第一集未开播）");
-    eprintln!("✓ 第一集开播（IPC 事件链路通；注：start-file 可能早于连接被错过，file-loaded 才是可靠的开播信号）");
+    assert!(playing, "30s 内 time-pos 未到 1s——本地片未真播放");
+    eprintln!("✓ 第一集真在播（time-pos≥1s；IPC 事件链路通）");
 
     // 换第二集：同一会话 loadfile replace
-    let m2 = resolve(2);
-    eprintln!("step4: resolved ep2, sending loadfile");
-    session.load(&item(&m2, 2)).expect("loadfile ep2");
+    session.load(&item(&ep2, 2)).expect("loadfile ep2");
     eprintln!("step5: loadfile acknowledged");
 
     // 应先收到换集引起的 end-file(Replaced)，再收到第二集 start-file
@@ -606,7 +557,7 @@ fn append_playlist_seamless_next() {
 #[ignore]
 fn gui_play_now_playing() {
     std::env::set_var("GUO_MPV_ARGS", "--vo=null --ao=null");
-    std::env::set_var("GUO_RESOLVE_OVERRIDE", hermetic_media());
+    common::hermetic().install();
     std::env::set_var("GUOAPP_DATA", temp_data_dir());
     let mut harness: H = Harness::builder()
         .with_size(egui::vec2(1180.0, 740.0))
