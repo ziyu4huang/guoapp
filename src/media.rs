@@ -17,12 +17,26 @@ pub fn try_resolve_media(
     series_id: &str,
     video_id: &str,
 ) -> Result<Media, String> {
+    // 测试/离线注入:GUO_RESOLVE_OVERRIDE 指向任意媒体(本地文件或 HTTP URL),
+    // 三层取流短路返回。上游锁定期间(INC-20261015),UI 测试不再依赖第三方可用性。
+    if let Ok(url) = std::env::var("GUO_RESOLVE_OVERRIDE") {
+        if !url.trim().is_empty() {
+            return Ok(Media {
+                url: url.trim().to_string(),
+                referer: String::new(),
+                quality: 0,
+                cenc_key: None,
+                variants: Vec::new(),
+            });
+        }
+    }
     let mut errors = Vec::new();
     match client.media(store, video_id) {
         Ok(media) => return Ok(media),
         Err(err) => errors.push(format!("App 取流：{}", err)),
     }
-    match client.web_media(series_id, video_id) {
+    // 网页层带登录会话 cookie(用户在 GUI 粘贴过 → 解锁登录态播放数据)
+    match client.web_media_with_cookie(series_id, video_id, Some(store.state.web_cookie.as_str())) {
         Ok(media) => return Ok(media),
         Err(err) => errors.push(format!("网页取流：{}", err)),
     }

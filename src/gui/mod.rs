@@ -311,6 +311,9 @@ pub struct GuiApp {
     dl_selection: HashMap<String, HashSet<usize>>,
     /// 目录显示过滤（None=全部；Some(genre_key)=只显示该分类）
     catalog_view: Option<String>,
+    /// 网页登录对话框（cookie 导入）
+    login_dialog_open: bool,
+    login_cookie_input: String,
     search_input: String,
     search_submitted: String,
     search_results: Vec<Drama>,
@@ -384,6 +387,8 @@ impl GuiApp {
             autoplay_next: true,
             dl_selection: HashMap::new(),
             catalog_view: None,
+            login_dialog_open: false,
+            login_cookie_input: String::new(),
             catalog_sort,
         };
         for genre in GENRES.iter() {
@@ -1486,6 +1491,57 @@ impl eframe::App for GuiApp {
             Tab::Search => self.show_search(ctx),
             Tab::Library => self.show_library(ctx),
         }
+
+        // 网页登录对话框(cookie 导入)——上游锁定匿名取流后的试行解锁路径
+        if self.login_dialog_open {
+            let mut save = false;
+            let mut clear = false;
+            egui::Window::new("🔑 登录红果网页账号")
+                .open(&mut self.login_dialog_open)
+                .collapsible(false)
+                .show(ctx, |ui| {
+                    ui.label("上游已锁定匿名取流——登录态可能解锁播放（试行）。");
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new("获取 cookie 三步：").strong());
+                    ui.label("1. 浏览器打开 hongguoduanju.com 并登录账号");
+                    ui.label("2. 按 F12 打开开发者工具 → 网络(Network)→ 随便点一个请求");
+                    ui.label("3. 在请求头里复制整行 Cookie 的值，粘贴到下面：");
+                    ui.add_space(4.0);
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.login_cookie_input)
+                            .desired_rows(4)
+                            .desired_width(380.0)
+                            .hint_text("粘贴整行 Cookie 值（不含 Cookie: 前缀）"),
+                    );
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("保存").clicked() {
+                            save = true;
+                        }
+                        if !self.store.state.web_cookie.is_empty()
+                            && ui.button("清除已存").clicked()
+                        {
+                            clear = true;
+                        }
+                        ui.weak(if self.store.state.web_cookie.is_empty() {
+                            "未设置"
+                        } else {
+                            "已保存（仅存本机数据目录，不上传）"
+                        });
+                    });
+                });
+            if save {
+                self.store.state.web_cookie = self.login_cookie_input.trim().to_string();
+                let _ = self.store.save();
+                self.set_status("网页 cookie 已保存——重新点击要播放的集数试试");
+            }
+            if clear {
+                self.store.state.web_cookie.clear();
+                self.login_cookie_input.clear();
+                let _ = self.store.save();
+                self.set_status("网页 cookie 已清除");
+            }
+        }
     }
 }
 
@@ -1985,6 +2041,16 @@ impl GuiApp {
                                 play_ep = Some(cur_ep);
                             }
                             ui.checkbox(autoplay_next, "连播");
+                            if ui
+                                .small_button(if self.store.state.web_cookie.is_empty() {
+                                    "🔑 登录"
+                                } else {
+                                    "🔑 已登录"
+                                })
+                                .clicked()
+                            {
+                                self.login_dialog_open = true;
+                            }
                             ui.colored_label(
                                 egui::Color32::from_rgb(255, 200, 90),
                                 format!("● 正在播放：第{}集", cur_ep),
@@ -2022,12 +2088,22 @@ impl GuiApp {
                             play_ep = Some(hero_ep);
                         }
                         ui.checkbox(autoplay_next, "连播");
-                    }
-                    ui.add_space(2.0);
-                    ui.label(format!(
-                        "共 {} 集（点击集数即播放 · 右键加入下载清单）",
-                        chapters.len()
-                    ));
+                            if ui
+                                .small_button(if self.store.state.web_cookie.is_empty() {
+                                    "🔑 登录"
+                                } else {
+                                    "🔑 已登录"
+                                })
+                                .clicked()
+                            {
+                                self.login_dialog_open = true;
+                            }
+                        }
+                        ui.add_space(2.0);
+                        ui.label(format!(
+                            "共 {} 集（点击集数即播放 · 右键加入下载清单）",
+                            chapters.len()
+                        ));
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
                         for chapter in chapters.iter() {

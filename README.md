@@ -112,6 +112,18 @@ cargo run --release --bin guo-gui     # 或直接运行 target/release/guo-gui
 未移植：Flutter UI、弹幕、画中画、画质增强、局域网同步、其他站源
 （韩小圈/鬼片/青空/黄豆等）。要的就是精小：只保留红果一条完整闭环。
 
+## 登录解锁取流（重要）
+
+上游已锁定匿名取流（2026-10-15，详见
+[INC 文档](docs/INC-20261015-play-endpoint-lockdown.md)），未登录时点击播放会提示
+「取流失败」。试行解锁路径：
+
+1. 详情页点「🔑 登录」→ 按对话框三步把网页登录 cookie 粘贴进来（仅存本机）；
+2. 重新点击要播放的集数——cookie 解锁有效即可恢复播放；
+3. 命令行可用 `guo web-play <series_id> <video_id>` 快速验证。
+
+若 cookie 路径无效（上游改动仍在加码），片库已下载的内容不受影响。
+
 ## 下载安装（预编译）
 
 从 [GitHub Releases](https://github.com/ziyu4huang/guoapp/releases) 下载对应平台的压缩包

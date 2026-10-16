@@ -28,6 +28,9 @@ pub struct State {
     /// 目录排序偏好（hgapp::SORT_*，跨启动记忆）。
     #[serde(default)]
     pub catalog_sort: String,
+    /// 红果网页登录会话 cookie（用户从浏览器粘贴；播放页需登录态才有播放数据）
+    #[serde(default)]
+    pub web_cookie: String,
     /// 每部剧各自的播放记录（互不共用；key=drama_id）。
     #[serde(default)]
     pub watch: BTreeMap<String, WatchRec>,

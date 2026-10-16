@@ -9,6 +9,71 @@ use egui_kittest::Harness;
 type App = guo::gui::GuiApp;
 type H<'a> = Harness<'a, App>;
 
+/// 隔离测试媒体源:本地 Range 伺服器(配合 GUO_RESOLVE_OVERRIDE,與上游脫鉤)。
+fn hermetic_media() -> String {
+    use std::io::{Read, Write};
+    let body: std::sync::Arc<Vec<u8>> =
+        std::sync::Arc::new((0..2_000_000u32).map(|i| (i % 251) as u8).collect());
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let body = body.clone();
+            std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                let mut one = [0u8; 1];
+                loop {
+                    let n = stream.read(&mut one).unwrap_or(0);
+                    if n == 0 || buf.len() > 16384 {
+                        return;
+                    }
+                    buf.extend_from_slice(&one[..n]);
+                    if buf.ends_with(b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let request = String::from_utf8_lossy(&buf).to_string();
+                let total = body.len();
+                let range = request
+                    .lines()
+                    .find_map(|l| l.strip_prefix("Range: bytes="))
+                    .map(|s| s.trim().trim_start_matches("bytes=").to_string());
+                let (status, extra, slice): (&str, String, &[u8]) = match range.as_deref() {
+                    Some(spec) => {
+                        let mut it = spec.splitn(2, '-');
+                        let s: usize = it.next().unwrap_or("").trim().parse().unwrap_or(0);
+                        let e: usize = it
+                            .next()
+                            .unwrap_or("")
+                            .trim()
+                            .parse::<usize>()
+                            .map(|v| (v + 1).min(total))
+                            .unwrap_or(total);
+                        if s < e && e <= total {
+                            (
+                                "206 Partial Content",
+                                format!("Content-Range: bytes {}-{}/{}\r\n", s, e - 1, total),
+                                &body[s..e],
+                            )
+                        } else {
+                            ("200 OK", String::new(), &body[..])
+                        }
+                    }
+                    None => ("200 OK", String::new(), &body[..]),
+                };
+                let head = format!(
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n",
+                    slice.len()
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(slice);
+            });
+        }
+    });
+    format!("http://127.0.0.1:{port}/sample.mp4")
+}
+
 fn temp_data_dir() -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "guo-gif-{}-{}",
@@ -134,6 +199,8 @@ fn first_card(harness: &mut H) -> String {
 #[test]
 #[ignore]
 fn record_demo_gif() {
+    // 下载链路 hermetic(上游锁定后真网下载不可用)
+    std::env::set_var("GUO_RESOLVE_OVERRIDE", hermetic_media());
     let out = gif_dir();
     let _ = std::fs::remove_dir_all(&out);
     std::env::set_var("GUOAPP_DATA", temp_data_dir());
@@ -539,6 +606,7 @@ fn append_playlist_seamless_next() {
 #[ignore]
 fn gui_play_now_playing() {
     std::env::set_var("GUO_MPV_ARGS", "--vo=null --ao=null");
+    std::env::set_var("GUO_RESOLVE_OVERRIDE", hermetic_media());
     std::env::set_var("GUOAPP_DATA", temp_data_dir());
     let mut harness: H = Harness::builder()
         .with_size(egui::vec2(1180.0, 740.0))

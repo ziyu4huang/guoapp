@@ -93,6 +93,7 @@ fn main() {
         "detail" => detail(&client, &store, rest),
         "resolve" => resolve(&client, &store, rest),
         "play" => play(&client, &store, rest),
+        "web-play" => web_play(&client, &store, rest),
         "download" => download(&client, &mut store, rest),
         "library" => library(&store, rest),
         "cenc-debug" => {
@@ -523,6 +524,27 @@ fn play(client: &HgClient, store: &Store, rest: &[String]) -> i32 {
             );
             0
         }
+    }
+}
+
+
+/// `guo web-play <series_id> <video_id>` — 网页层取流探针：
+/// 验证粘贴的网页 cookie 是否解锁播放数据（INC-20261015 的验证入口）。
+fn web_play(client: &HgClient, store: &Store, rest: &[String]) -> i32 {
+    if rest.len() < 2 {
+        return fail("用法：guo web-play <series_id> <video_id>");
+    }
+    if store.state.web_cookie.is_empty() {
+        eprintln!("提示：尚未设置网页 cookie（GUI 详情页🔑登录，或编辑数据目录 state.json）");
+    }
+    match client.web_media_with_cookie(&rest[0], &rest[1], Some(store.state.web_cookie.as_str())) {
+        Ok(m) => {
+            println!("✓ 网页取流成功（cookie 解锁有效）");
+            println!("  地址: {}", &m.url[..80.min(m.url.len())]);
+            println!("  变体数: {}", m.variants.len());
+            0
+        }
+        Err(e) => fail(&format!("网页取流仍失败：{}（cookie 未解锁——可能需要完整登录态或该功能已下线）", e)),
     }
 }
 

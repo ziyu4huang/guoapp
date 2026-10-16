@@ -10,15 +10,23 @@ use std::time::Duration;
 
 impl HgClient {
     fn fetch_page(&self, url: &str) -> Result<String, String> {
-        let response = self
+        self.fetch_page_with_cookie(url, None)
+    }
+
+    /// 登录会话版：带用户粘贴的红果网页 cookie(播放页需登录态才有播放数据)。
+    fn fetch_page_with_cookie(&self, url: &str, cookie: Option<&str>) -> Result<String, String> {
+        let mut request = self
             .agent
             .get(url)
             .timeout(Duration::from_secs(20))
             .set("User-Agent", WEB_UA)
             .set("Referer", &format!("{}/", WEB_BASE))
             .set("Accept", "text/html,application/json")
-            .set("Accept-Language", "zh-CN,zh;q=0.9")
-            .call();
+            .set("Accept-Language", "zh-CN,zh;q=0.9");
+        if let Some(c) = cookie.filter(|c| !c.trim().is_empty()) {
+            request = request.set("Cookie", c.trim());
+        }
+        let response = request.call();
         match response {
             Ok(r) => {
                 let text = r
@@ -165,14 +173,19 @@ impl HgClient {
     }
 
     /// Web player: returns media when the page exposes public addresses.
-    pub fn web_media(&self, series_id: &str, video_id: &str) -> Result<Media, String> {
+    pub fn web_media_with_cookie(
+        &self,
+        series_id: &str,
+        video_id: &str,
+        cookie: Option<&str>,
+    ) -> Result<Media, String> {
         let page_url = format!(
             "{}/player/{}/{}/",
             WEB_BASE,
             urlencode(series_id),
             urlencode(video_id)
         );
-        let body = self.fetch_page(&page_url)?;
+        let body = self.fetch_page_with_cookie(&page_url, cookie)?;
         let data = parse_router_data(&body).ok_or("红果播放页数据不可用")?;
         let page = loader_map(&data, &["player_", "player_page"]).ok_or("红果播放页数据不可用")?;
         if jstr(page, &["vid"]) != video_id || jstr(page, &["series_id"]) != series_id {
