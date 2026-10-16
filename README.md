@@ -1,9 +1,7 @@
-# guoapp（Rust 重写）
+# guoapp
 
 **在电脑上追红果短剧的桌面客户端**：封面卡片墙浏览 / 搜索 / 在线播放 / 离线下载，
-含 **GUI（egui 原生窗口）与 CLI** 两套界面。参考
-[zhoufuweigg/guoapp](https://github.com/zhoufuweigg/guoapp)
-（Flutter + Go 原生核心，约 5.4 万行）的核心业务逻辑，用 Rust 从零重写：
+含 **GUI（egui 原生窗口）与 CLI** 两套界面，Rust 从零实现：
 release 下 CLI 约 **1.5 MB**、GUI 约 **4.0 MB**，单文件、无运行时依赖。
 
 **三种看片方式**
@@ -56,7 +54,7 @@ cargo run --release --bin guo-gui     # 或直接运行 target/release/guo-gui
 - **搜索**：输入剧名回车，结果卡片墙（与 CLI 同一套合并排序逻辑）
 - **详情面板**：点击卡片展开，封面、简介、点选集数（默认全选），
   「下载选中 / 全部下载 / 播放第1集」
-- **下载管理**：双 worker 并发（与原版默认一致），实时进度条，失败原因内联显示
+- **下载管理**：双 worker 并发，实时进度条，失败原因内联显示
 - **片库**：已下载剧目列表，每集 ▶ 按钮用系统播放器打开，「打开目录」直达文件夹
 - 封面：CDN 返回 HEIC，macOS 上自动经系统 `sips` 转码（零额外依赖）；
   非 macOS 需站源返回 jpeg/webp 才有封面
@@ -98,19 +96,19 @@ cargo run --release --bin guo-gui     # 或直接运行 target/release/guo-gui
 - 数据与 CLI 共用：`$GUOAPP_DATA` / `~/.local/share/guoapp`（macOS
   `~/Library/Application Support/guoapp`），下载状态两端互通
 
-## 与原版的关系
+## 代码结构
 
-| 原版（Go `native/core` + Flutter） | 本项目（Rust） |
+| 模块 | 职责 |
 | --- | --- |
-| `provider_hongguo*.go` App API + X-Gorgon 签名 | `src/hgapp.rs` + `src/sign.rs` |
-| 网页 `_ROUTER_DATA` 目录/详情/播放/搜索回退 | `src/hgweb.rs` |
-| 备用播放中继 + v2 响应解密 + spade_a 密钥 | `src/backup.rs` |
-| FFmpegKit / mpv 解 CENC | `src/cenc.rs`（自带渐进式 MP4 CENC-CTR 解密器） |
-| HLS 捆绑下载（分片/密钥本地化改写） | `src/media.rs` |
-| 追剧/下载记录 | `src/state.rs`（JSON 状态） |
-
-未移植：Flutter UI、弹幕、画中画、画质增强、局域网同步、其他站源
-（韩小圈/鬼片/青空/黄豆等）。要的就是精小：只保留红果一条完整闭环。
+| `src/hgapp.rs` + `src/sign.rs` | 红果 App API（X-Gorgon 签名）+ 目录/详情/取流解析 |
+| `src/hgweb.rs` | 网页 `_ROUTER_DATA` 目录/详情/播放/搜索回退层 |
+| `src/backup.rs` | 备用播放中继 + v2 响应解密 + spade_a 内容密钥 |
+| `src/cenc.rs` | 自带渐进式 MP4 CENC-CTR 解密器（在线播放/离线解密共用） |
+| `src/media.rs` | HLS/MP4 下载（分片/密钥本地化改写、多连接并行、断点续传） |
+| `src/player.rs` | mpv 单实例 IPC 会话（连播预载/窗口记忆/播放位置取样） |
+| `src/browser_cookies.rs` | 浏览器登录 cookie 自动提取（Chrome 家族+Safari） |
+| `src/state.rs` | 播放记录/下载片库/偏好持久化（JSON 状态） |
+| `src/gui/` | egui 原生 GUI（目录/搜索/片库/详情双模式/播放条） |
 
 ## 登录解锁取流（重要）
 
@@ -205,7 +203,7 @@ guo library                          # 本地已下载剧目
   8/16 字节 IV 均支持），产出普通 `media.mp4`，任何播放器可放。
 - HLS：分片与 AES-128 密钥全部本地化，`index.m3u8` 离线可播
   （`mpv ep_001/index.m3u8`）。
-- 失败重跑同一命令即续传（.part + ETag/If-Range 校验，与原版一致）。
+- 失败重跑同一命令即续传（.part + ETag/If-Range 校验）。
 
 ### 隐藏调试命令
 
@@ -224,7 +222,7 @@ guo cenc-debug --file <mp4>                                # 打印轨道解析�
 
 ## 验证记录（2026-10-11）
 
-- 签名：与原版 Go 算法的独立 Python 移植逐字节一致（单元测试固化）。
+- 签名算法经独立移植交叉对拍，逐字节一致（单元测试固化）。
 - 目录/搜索/联想/详情：真实 API 全通；网页回退路径验证通过。
 - 取流：1080p 直连 mp4 + CENC 密钥。
 - 下载 + 解密：`ffmpeg -v error` 全片（113s，HEVC 1080x1920 + HE-AACv2）
