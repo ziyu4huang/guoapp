@@ -296,7 +296,11 @@ mod watch_tests {
         assert_eq!(cs.len(), 2);
         assert_eq!((cs[0].index, cs[1].index), (1, 3), "必須按集號排序");
         assert!(cs[0].local);
-        assert!(cs[0].video_id.ends_with("ep_001/e1.mp4"));
+        // 路徑用 join 語義比對（Windows 分隔符不同，禁字面量 ends_with）
+        let expected = std::path::PathBuf::from("/dl/剧")
+            .join("ep_001")
+            .join("e1.mp4");
+        assert_eq!(std::path::PathBuf::from(&cs[0].video_id), expected);
     }
 }
 
