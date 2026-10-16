@@ -32,24 +32,22 @@ jobs:
           rustup target add x86_64-apple-darwin
           cargo build --release
           cargo build --release --target x86_64-apple-darwin
-      - name: Package arm64 (CLI + Guo.app)
+      - name: Package arm64 (Guo.app)
         run: |
           VER="${GITHUB_REF_NAME}"
           DIR="dist/guoapp-${VER}-macos-arm64"
           mkdir -p "${DIR}"
-          cp target/release/guo "${DIR}/"
           APP="${DIR}/Guo.app/Contents/MacOS"
           mkdir -p "${APP}"
           cp target/release/guo-gui "${APP}/guo-gui"
           sed "s/__VER__/${VER#v}/" packaging/Info.plist > "${DIR}/Guo.app/Contents/Info.plist"
           cp README.md LICENSE "${DIR}/"
           (cd dist && zip -qry "guoapp-${VER}-macos-arm64.zip" "guoapp-${VER}-macos-arm64")
-      - name: Package x64 (CLI + Guo.app)
+      - name: Package x64 (Guo.app)
         run: |
           VER="${GITHUB_REF_NAME}"
           DIR="dist/guoapp-${VER}-macos-x64"
           mkdir -p "${DIR}"
-          cp target/x86_64-apple-darwin/release/guo "${DIR}/"
           APP="${DIR}/Guo.app/Contents/MacOS"
           mkdir -p "${APP}"
           cp target/x86_64-apple-darwin/release/guo-gui "${APP}/guo-gui"
@@ -75,8 +73,8 @@ jobs:
           $ver = $env:GITHUB_REF_NAME
           $dir = "dist/guoapp-$ver-windows-x64"
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          Copy-Item target/release/guo.exe $dir/
-          Copy-Item target/release/guo-gui.exe $dir/
+          # GUI-only:包裝裡只放 GUI(用戶面產品);CLI 自行 cargo build
+          Copy-Item target/release/guo-gui.exe $dir/Guo.exe
           Copy-Item README.md, LICENSE $dir/
           Compress-Archive -Path $dir -DestinationPath "dist/guoapp-$ver-windows-x64.zip"
       - name: Upload asset
@@ -99,7 +97,7 @@ jobs:
           VER="${GITHUB_REF_NAME}"
           DIR="dist/guoapp-${VER}-linux-x64"
           mkdir -p "${DIR}"
-          cp target/release/guo target/release/guo-gui README.md LICENSE "${DIR}/"
+          cp target/release/guo-gui README.md LICENSE "${DIR}/"
           tar -czf "dist/guoapp-${VER}-linux-x64.tar.gz" -C dist "guoapp-${VER}-linux-x64"
       - name: Upload asset
         env:

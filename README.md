@@ -119,14 +119,17 @@ cargo run --release --bin guo-gui     # 或直接运行 target/release/guo-gui
 
 | 压缩包 | 平台 | 内容 |
 | --- | --- | --- |
-| `guoapp-v*-macos-arm64.zip` | macOS（Apple Silicon） | `guo`（CLI）+ `Guo.app`（GUI） |
+| `guoapp-v*-macos-arm64.zip` | macOS（Apple Silicon） | `Guo.app`（GUI） |
 | `guoapp-v*-macos-x64.zip` | macOS（Intel） | 同上 |
-| `guoapp-v*-windows-x64.zip` | Windows 10/11 x64 | `guo.exe` + `guo-gui.exe` |
-| `guoapp-v*-linux-x64.tar.gz` | Linux x64（glibc） | `guo` + `guo-gui` |
+| `guoapp-v*-windows-x64.zip` | Windows 10/11 x64 | `Guo.exe`（GUI） |
+| `guoapp-v*-linux-x64.tar.gz` | Linux x64（glibc） | `guo-gui`（GUI） |
+
+> 预编译包只含 GUI（看片产品本体）。命令行版 `guo` 面向进阶用户，
+> 任何平台 `cargo build --release` 自取。
 
 - **macOS**：解压后把 `Guo.app` 拖进「应用程序」即可（未签名，首次打开右键 →
-  打开；或 `xattr -cr Guo.app`）。CLI 想全局可用可 `cp guo /usr/local/bin/`。
-- **Windows**：解压到任意目录直接运行 `guo-gui.exe`。在线播放需
+  打开；或 `xattr -cr Guo.app`）。
+- **Windows**：解压到任意目录直接运行 `Guo.exe`。在线播放需
   [mpv](https://mpv.io/)：安装后确保 `mpv` 在 PATH，或设环境变量
   `GUO_MPV` 指向 `mpv.exe` 完整路径。数据目录为
   `%USERPROFILE%\AppData\Local\guoapp`。
@@ -137,7 +140,7 @@ cargo run --release --bin guo-gui     # 或直接运行 target/release/guo-gui
 ## 构建
 
 ```sh
-cargo build --release     # target/release/guo，约 1.5 MB
+cargo build --release     # target/release/{guo, guo-gui}（CLI + GUI）
 cargo test                # 7 项单元测试
 ```
 
