@@ -160,8 +160,10 @@ fn parse_track(data: &[u8], trak_start: usize, trak_end: usize) -> Option<Track>
                         sample_sizes = vec![fixed as u32; count];
                     } else {
                         sample_sizes = data[stsz_body + 12..stsz_body + 12 + count * 4]
-                            .chunks_exact(4)
-                            .map(|c| u32::from_be_bytes(c.try_into().unwrap()))
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
+                            .map(|c| u32::from_be_bytes(*c))
                             .collect();
                     }
                 }
