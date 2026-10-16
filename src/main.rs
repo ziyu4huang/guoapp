@@ -68,6 +68,7 @@ guo — 红果短剧命令行工具（guoapp 的 Rust 重写核心）
   guo play <剧ID> <集数> [--quality N] [--player mpv|iina|print]
   guo download <剧ID> [--eps 1-5,8] [--out 目录] [--quality N] [--json]
   guo library [--json]
+  guo cookie [--no-save] [--domain 域名]
 
 剧ID 形如 hongguo:7123456789012345678（catalog / search / detail 输出的第一列）。
 数据目录: $GUOAPP_DATA 或 ~/.local/share/guoapp（macOS: ~/Library/Application Support/guoapp）。";
@@ -96,6 +97,7 @@ fn main() {
         "web-play" => web_play(&client, &store, rest),
         "download" => download(&client, &mut store, rest),
         "library" => library(&store, rest),
+        "cookie" => cookie_cmd(&mut store, rest),
         "cenc-debug" => {
             let (_, flags) = parse_args(rest);
             match flags.get("file") {
@@ -548,8 +550,46 @@ fn web_play(client: &HgClient, store: &Store, rest: &[String]) -> i32 {
     }
 }
 
-fn parse_eps(spec: &str, total: usize) -> Result<Vec<usize>, String> {
-    let mut out = std::collections::BTreeSet::new();
+/// `guo cookie` — 从本机浏览器自动提取网页登录 cookie（INC-20261015 解锁自动化）。
+/// Chrome 家族主路 + Safari 兜底；值永不全文打印，结果写入本机 state.json。
+fn cookie_cmd(store: &mut Store, rest: &[String]) -> i32 {
+    let (_, flags) = parse_args(rest);
+    let domain = flags
+        .get("domain")
+        .cloned()
+        .unwrap_or_else(|| guo::browser_cookies::WEB_LOGIN_DOMAIN.into());
+    let save = !flag_bool(&flags, "no-save");
+    println!(
+        "正在从本机浏览器提取 {} 的登录 cookie（Chrome→Edge→Brave→Arc→Chromium→Safari）…\
+         若弹出钥匙圈授权对话框请点「允许」",
+        domain
+    );
+    match guo::browser_cookies::extract_login_cookie(&domain) {
+        Ok(ex) => {
+            println!(
+                "✓ 来源：{}——{} 颗 cookie（{}）",
+                ex.source,
+                ex.names.len(),
+                ex.names.join(", ")
+            );
+            if save {
+                store.state.web_cookie = ex.header;
+                let _ = store.save();
+                println!("已写入本机数据目录 state.json（仅本机，不上传）");
+                println!("验证：guo web-play <series_id> <video_id>");
+            } else {
+                println!("（--no-save 试提取，未写入）");
+            }
+            0
+        }
+        Err(e) => fail(&format!(
+            "自动提取失败：{}\n  回退方案：浏览器登录后，在 GUI 🔑 对话框手动粘贴整行 Cookie",
+            e
+        )),
+    }
+}
+
+fn parse_eps(spec: &str, total: usize) -> Result<Vec<usize>, String> {    let mut out = std::collections::BTreeSet::new();
     for part in spec.split(',') {
         let part = part.trim();
         if part.is_empty() {

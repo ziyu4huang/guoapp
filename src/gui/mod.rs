@@ -205,6 +205,10 @@ enum Msg {
         referer: String,
         key: Option<String>,
     },
+    /// 浏览器 cookie 自动提取完成：Ok=(来源, cookie 名列表, Cookie 请求头)。
+    CookieFetch {
+        result: Result<(String, Vec<String>, String), String>,
+    },
     Status(String),
 }
 
@@ -314,6 +318,8 @@ pub struct GuiApp {
     /// 网页登录对话框（cookie 导入）
     login_dialog_open: bool,
     login_cookie_input: String,
+    /// 「从浏览器自动获取」进行中（钥匙圈授权/解密在后台线程）。
+    cookie_fetch_busy: bool,
     search_input: String,
     search_submitted: String,
     search_results: Vec<Drama>,
@@ -389,6 +395,7 @@ impl GuiApp {
             catalog_view: None,
             login_dialog_open: false,
             login_cookie_input: String::new(),
+            cookie_fetch_busy: false,
             catalog_sort,
         };
         for genre in GENRES.iter() {
@@ -473,6 +480,24 @@ impl GuiApp {
                     warning: Some(err),
                 });
             }
+        });
+    }
+
+    /// 后台线程自动提取浏览器登录 cookie（Chrome 家族主路+Safari 兜底）。
+    /// 钥匙圈首次访问会弹授权对话框，用户点「允许」后线程才能拿到解密密钥。
+    fn request_cookie_fetch(&mut self) {
+        if self.cookie_fetch_busy {
+            return;
+        }
+        self.cookie_fetch_busy = true;
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let result = crate::browser_cookies::extract_login_cookie(
+                crate::browser_cookies::WEB_LOGIN_DOMAIN,
+            );
+            let _ = tx.send(Msg::CookieFetch {
+                result: result.map(|ex| (ex.source, ex.names, ex.header)),
+            });
         });
     }
 
@@ -952,7 +977,7 @@ impl GuiApp {
                             .clone();
                         detail.selected = picked;
                         // 到访即更新「见过总集数」基准——追更提醒只在没看过的新集上出现
-                        if list.len() > 0 {
+                        if !list.is_empty() {
                             let rec = self.store.state.watch.entry(drama_id.clone()).or_default();
                             if list.len() > rec.seen_total {
                                 rec.seen_total = list.len();
@@ -1136,6 +1161,25 @@ impl GuiApp {
                 if prefs != crate::player::PlayerPrefs::default() {
                     self.store.state.player_prefs = prefs;
                     let _ = self.store.save();
+                }
+            }
+            Msg::CookieFetch { result } => {
+                self.cookie_fetch_busy = false;
+                match result {
+                    Ok((source, names, header)) => {
+                        self.store.state.web_cookie = header;
+                        self.login_cookie_input.clear();
+                        let _ = self.store.save();
+                        self.set_status(format!(
+                            "已从{}自动获取 {} 颗登录 cookie（{}）——重新点要播的集数试试",
+                            source,
+                            names.len(),
+                            names.join(", ")
+                        ));
+                    }
+                    Err(err) => {
+                        self.set_status(format!("自动取 cookie 失败：{}", err));
+                    }
                 }
             }
             Msg::Status(text) => self.set_status(text),
@@ -1496,11 +1540,33 @@ impl eframe::App for GuiApp {
         if self.login_dialog_open {
             let mut save = false;
             let mut clear = false;
+            let mut auto_fetch = false;
             egui::Window::new("🔑 登录红果网页账号")
                 .open(&mut self.login_dialog_open)
                 .collapsible(false)
                 .show(ctx, |ui| {
                     ui.label("上游已锁定匿名取流——登录态可能解锁播放（试行）。");
+                    #[cfg(target_os = "macos")]
+                    {
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            if self.cookie_fetch_busy {
+                                ui.add_enabled(
+                                    false,
+                                    egui::Button::new("正在读取浏览器 cookie…"),
+                                );
+                            } else if ui.button("⚡ 从浏览器自动获取").clicked() {
+                                auto_fetch = true;
+                            }
+                        });
+                        if self.cookie_fetch_busy {
+                            ui.weak("若弹出钥匙圈授权对话框，请点「允许」（一次性授权）");
+                        } else {
+                            ui.weak("自动获取：直接读本机浏览器的红果登录 cookie（Chrome/Edge/Brave/Arc/Safari）");
+                        }
+                        ui.add_space(4.0);
+                        ui.separator();
+                    }
                     ui.add_space(4.0);
                     ui.label(egui::RichText::new("获取 cookie 三步：").strong());
                     ui.label("1. 浏览器打开 hongguoduanju.com 并登录账号");
@@ -1530,6 +1596,9 @@ impl eframe::App for GuiApp {
                         });
                     });
                 });
+            if auto_fetch {
+                self.request_cookie_fetch();
+            }
             if save {
                 self.store.state.web_cookie = self.login_cookie_input.trim().to_string();
                 let _ = self.store.save();
@@ -1663,7 +1732,7 @@ impl GuiApp {
                     .filter(|(k, _)| {
                         catalog_view
                             .as_deref()
-                            .map_or(true, |v| k.starts_with(&format!("{v}@")))
+                            .is_none_or(|v| k.starts_with(&format!("{v}@")))
                     })
                     .all(|(_, v)| v.is_empty());
                 if visible_empty
@@ -1729,8 +1798,8 @@ impl GuiApp {
         if let Some(sort) = switch_sort {
             self.set_catalog_sort(sort);
         }
-        if switch_view.is_some() {
-            self.catalog_view = switch_view.unwrap();
+        if let Some(view) = switch_view {
+            self.catalog_view = view;
         }
         if let Some(genre) = more {
             self.request_catalog_page(&genre);

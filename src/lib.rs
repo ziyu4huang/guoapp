@@ -2,6 +2,7 @@
 //! CENC 解密、HLS 捆绑下载、状态持久化，以及 egui 原生 GUI。
 
 pub mod backup;
+pub mod browser_cookies;
 pub mod cenc;
 pub mod gui;
 pub mod hgapp;

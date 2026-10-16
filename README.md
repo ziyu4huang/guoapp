@@ -118,9 +118,17 @@ cargo run --release --bin guo-gui     # 或直接运行 target/release/guo-gui
 [INC 文档](docs/INC-20261015-play-endpoint-lockdown.md)），未登录时点击播放会提示
 「取流失败」。试行解锁路径：
 
-1. 详情页点「🔑 登录」→ 按对话框三步把网页登录 cookie 粘贴进来（仅存本机）；
+1. 详情页点「🔑 登录」→ 点「⚡ 从浏览器自动获取」直接读本机浏览器的红果登录
+   cookie（macOS：Chrome/Edge/Brave/Arc/Chromium→Safari 级联；首次访问
+   Chrome 系会弹钥匙圈授权对话框，点「允许」即可，此后免打扰）；
+   非 macOS 或自动获取失败时，按对话框三步手动粘贴整行 Cookie（仅存本机）；
 2. 重新点击要播放的集数——cookie 解锁有效即可恢复播放；
-3. 命令行可用 `guo web-play <series_id> <video_id>` 快速验证。
+3. 命令行一步到位：`guo cookie` 自动提取并保存（`--no-save` 试提取、
+   `--domain <域名>` 换目标域），再用 `guo web-play <series_id> <video_id>` 验证。
+
+注意：自动提取读的是**你已登录的浏览器**——若从未在任一浏览器登录过
+hongguoduanju.com，先登录一次，之后 `guo cookie` / ⚡ 按钮随时一键同步。
+Cookie 值永不打印到日志/输出（一律脱敏显示），只落本机数据目录 state.json。
 
 若 cookie 路径无效（上游改动仍在加码），片库已下载的内容不受影响。
 

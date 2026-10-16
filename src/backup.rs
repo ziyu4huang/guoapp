@@ -28,7 +28,7 @@ fn decode_b64_lenient(value: &str) -> Result<Vec<u8>, String> {
         .map_err(|_| "base64 解码失败".into())
 }
 
-fn aes_cbc_decrypt(key: &[u8], iv: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn aes_cbc_decrypt(key: &[u8], iv: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, String> {
     use cbc::cipher::BlockDecryptMut;
     type Aes128CbcDec = cbc::Decryptor<aes::Aes128>;
     let mut decryptor = Aes128CbcDec::new_from_slices(key, iv).map_err(|e| e.to_string())?;

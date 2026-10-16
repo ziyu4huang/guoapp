@@ -256,7 +256,7 @@ fn gui_full_flow() {
         .query_all_by_label_contains("共")
         .filter_map(|node| node.value().and_then(|l| digits(&l)))
         .collect();
-    let shortest_count = counts.iter().copied().min().expect("no drama cards");
+    let _shortest_count = counts.iter().copied().min().expect("no drama cards");
     // 卡片按钮 label = 剧名（WidgetType::Button）；排除顶栏固定按钮后取第一张。
     // 集数与剧名的对应不重要：后面按 count 循环取消选中即可。
     const FIXED: [&str; 3] = ["清空封面缓存", "刷新", "搜索"];

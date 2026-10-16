@@ -164,7 +164,7 @@ fn download_bundle(
                     working = name;
                 }
             } else if working.contains("URI=\"") {
-                while let Some(start) = working.find("URI=\"") {
+                if let Some(start) = working.find("URI=\"") {
                     let after = &working[start + 5..];
                     let end = after.find('"').ok_or("内嵌地址无效")?;
                     let reference = &after[..end];
@@ -201,8 +201,7 @@ fn download_bundle(
                         &format!("URI=\"{}\"", name),
                         1,
                     );
-                    working = replaced;
-                    break; // one URI per line in practice
+                    working = replaced; // one URI per line in practice
                 }
             }
             if working.starts_with("#EXT-X-STREAM-INF:") {

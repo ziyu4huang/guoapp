@@ -1,12 +1,16 @@
 [package]
 name = "guo"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 description = "guoapp — 红果短剧工具（Rust 重写）：CLI + 原生 GUI（egui），目录 / 搜索 / 取流 / 下载"
 
 [dependencies]
 mimalloc = "0.1"
 ureq = "2"
+rusqlite = { version = "0.32", features = ["bundled"] }
+pbkdf2 = "0.12"
+hmac = "0.12"
+sha1 = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 md-5 = "0.10"

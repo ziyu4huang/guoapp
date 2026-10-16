@@ -301,7 +301,7 @@ fn ipc_session_live() {
     let item = |m: &guo::model::Media, ep: usize| PlayItem {
         url: m.url.clone(),
         referer: m.referer.clone(),
-        key: m.cenc_key.as_ref().map(|k| hex::encode(k)),
+        key: m.cenc_key.as_ref().map(hex::encode),
         title: format!("《世子爷他要以身相许》第{}集", ep),
         start: 0,
     };
