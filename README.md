@@ -127,8 +127,13 @@ cargo run --release --bin guo-gui     # 或直接运行 target/release/guo-gui
 > 预编译包只含 GUI（看片产品本体）。命令行版 `guo` 面向进阶用户，
 > 任何平台 `cargo build --release` 自取。
 
-- **macOS**：解压后把 `Guo.app` 拖进「应用程序」即可（未签名，首次打开右键 →
-  打开；或 `xattr -cr Guo.app`）。
+- **macOS 报「已损坏」？** 这是 macOS 13+ 对**无开发者签名** App 的统一报法
+  （下载自带隔离标记），不是包真的坏了。三选一：
+  ① 双击包内的 `双击修复打开.command`（一键解除隔离）；
+  ② 终端执行 `xattr -cr /Applications/Guo.app`；
+  ③ 系统设置 → 隐私权与安全性 → 底部「仍要打开」。
+  彻底消除警告需要 Apple Developer ID 签名+公证（$99/年），暂未购买。
+  解压后把 `Guo.app` 拖进「应用程序」即可。
 - **Windows**：解压到任意目录直接运行 `Guo.exe`。在线播放需
   [mpv](https://mpv.io/)：安装后确保 `mpv` 在 PATH，或设环境变量
   `GUO_MPV` 指向 `mpv.exe` 完整路径。数据目录为

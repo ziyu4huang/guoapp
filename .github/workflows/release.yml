@@ -32,7 +32,7 @@ jobs:
           rustup target add x86_64-apple-darwin
           cargo build --release
           cargo build --release --target x86_64-apple-darwin
-      - name: Package arm64 (Guo.app)
+      - name: Package arm64 (Guo.app, ad-hoc signed)
         run: |
           VER="${GITHUB_REF_NAME}"
           DIR="dist/guoapp-${VER}-macos-arm64"
@@ -41,9 +41,15 @@ jobs:
           mkdir -p "${APP}"
           cp target/release/guo-gui "${APP}/guo-gui"
           sed "s/__VER__/${VER#v}/" packaging/Info.plist > "${DIR}/Guo.app/Contents/Info.plist"
+          # ad-hoc 簽名整個 bundle(簽名缺損也是「已損壞」的成因之一,補齊)
+          codesign --force --deep --sign - "${DIR}/Guo.app"
           cp README.md LICENSE "${DIR}/"
-          (cd dist && zip -qry "guoapp-${VER}-macos-arm64.zip" "guoapp-${VER}-macos-arm64")
-      - name: Package x64 (Guo.app)
+          # 一鍵修復腳本:雙擊 = 清除隔離標記(macOS 13+ 對無簽名 app 報「已損壞」)
+          printf '#!/bin/bash\ncd "$(dirname "$0")"\nxattr -cr Guo.app\necho "已解除隔離,現在可以打開 Guo.app 了"\nread -n 1 -s -p "按任意鍵關閉"\n' > "${DIR}/双击修复打开.command"
+          chmod +x "${DIR}/双击修复打开.command"
+          # ditto 打包:完整保留權限/屬性(zip -q 有損 bundle 元數據的先例)
+          (cd dist && ditto -c -k --sequesterRsrc --keepParent "guoapp-${VER}-macos-arm64" "guoapp-${VER}-macos-arm64.zip")
+      - name: Package x64 (Guo.app, ad-hoc signed)
         run: |
           VER="${GITHUB_REF_NAME}"
           DIR="dist/guoapp-${VER}-macos-x64"
@@ -52,8 +58,11 @@ jobs:
           mkdir -p "${APP}"
           cp target/x86_64-apple-darwin/release/guo-gui "${APP}/guo-gui"
           sed "s/__VER__/${VER#v}/" packaging/Info.plist > "${DIR}/Guo.app/Contents/Info.plist"
+          codesign --force --deep --sign - "${DIR}/Guo.app"
           cp README.md LICENSE "${DIR}/"
-          (cd dist && zip -qry "guoapp-${VER}-macos-x64.zip" "guoapp-${VER}-macos-x64")
+          printf '#!/bin/bash\ncd "$(dirname "$0")"\nxattr -cr Guo.app\necho "已解除隔離,現在可以打開 Guo.app 了"\nread -n 1 -s -p "按任意鍵關閉"\n' > "${DIR}/双击修复打开.command"
+          chmod +x "${DIR}/双击修复打开.command"
+          (cd dist && ditto -c -k --sequesterRsrc --keepParent "guoapp-${VER}-macos-x64" "guoapp-${VER}-macos-x64.zip")
       - name: Upload assets
         env:
           GH_TOKEN: ${{ github.token }}
