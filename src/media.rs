@@ -183,7 +183,7 @@ fn download_bundle(
                         if working.contains("METHOD=NONE") {
                             name = String::new();
                         } else {
-                            name = format!("{}.key", &hex::encode(
+                            name = format!("{}.key", hex::encode(
                                 &sha2::Sha256::digest(resolved.as_bytes())[..16]
                             ));
                             if seen_assets.insert(name.clone()) {

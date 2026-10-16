@@ -1540,6 +1540,8 @@ impl eframe::App for GuiApp {
         if self.login_dialog_open {
             let mut save = false;
             let mut clear = false;
+            // 非 macOS 下自动获取按钮整块 cfg 掉，此旗标只读不写
+            #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
             let mut auto_fetch = false;
             egui::Window::new("🔑 登录红果网页账号")
                 .open(&mut self.login_dialog_open)

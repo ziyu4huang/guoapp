@@ -27,65 +27,57 @@ pub fn mask(value: &str) -> String {
 
 /// 级联提取：Chrome 家族（Chrome→Edge→Brave→Arc→Chromium，全部 profile）
 /// → Safari binarycookies。任一路拿到目标域 cookie 即返回。
+#[cfg(target_os = "macos")]
 pub fn extract_login_cookie(domain: &str) -> Result<Extraction, String> {
     let home = PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()));
     let mut errors: Vec<String> = Vec::new();
 
-    #[cfg(target_os = "macos")]
-    {
-        for browser in chrome_browsers() {
-            let profiles = chrome_profiles(&home.join(browser.dir));
-            if profiles.is_empty() {
-                continue;
-            }
-            // 钥匙圈是弹对话框的一次性授权动作——确认该 profile 真有目标域
-            // cookie 后才去取；没有则整浏览器零打扰跳过。
-            let mut cached_pass: Option<String> = None;
-            for profile in profiles {
-                let db = profile.join("Cookies");
-                let rows = match chrome_query_rows(&db, domain) {
-                    Ok(rows) => rows,
-                    Err(err) => {
-                        errors.push(format!("{}({}):{}", browser.label, profile_label(&profile), err));
-                        continue;
-                    }
-                };
-                if rows.is_empty() {
+    for browser in chrome_browsers() {
+        let profiles = chrome_profiles(&home.join(browser.dir));
+        if profiles.is_empty() {
+            continue;
+        }
+        // 钥匙圈是弹对话框的一次性授权动作——确认该 profile 真有目标域
+        // cookie 后才去取；没有则整浏览器零打扰跳过。
+        let mut cached_pass: Option<String> = None;
+        for profile in profiles {
+            let db = profile.join("Cookies");
+            let rows = match chrome_query_rows(&db, domain) {
+                Ok(rows) => rows,
+                Err(err) => {
+                    errors.push(format!("{}({}):{}", browser.label, profile_label(&profile), err));
                     continue;
                 }
-                if cached_pass.is_none() {
-                    cached_pass = Some(keychain_password(browser.service)?);
-                }
-                let pass = cached_pass.as_deref().unwrap_or_default();
-                match rows_to_header(&rows, pass) {
-                    Ok((header, names)) => {
-                        let label = profile_label(&profile);
-                        return Ok(Extraction {
-                            header,
-                            source: format!("{}·{}", browser.label, label),
-                            names,
-                        });
-                    }
-                    Err(err) => errors.push(format!("{}({}):{}", browser.label, profile_label(&profile), err)),
-                }
+            };
+            if rows.is_empty() {
+                continue;
             }
-        }
-        match safari_cookie_header(&home, domain) {
-            Ok((header, names)) => {
-                return Ok(Extraction {
-                    header,
-                    source: "Safari".into(),
-                    names,
-                });
+            if cached_pass.is_none() {
+                cached_pass = Some(keychain_password(browser.service)?);
             }
-            Err(err) => errors.push(format!("Safari:{}", err)),
+            let pass = cached_pass.as_deref().unwrap_or_default();
+            match rows_to_header(&rows, pass) {
+                Ok((header, names)) => {
+                    let label = profile_label(&profile);
+                    return Ok(Extraction {
+                        header,
+                        source: format!("{}·{}", browser.label, label),
+                        names,
+                    });
+                }
+                Err(err) => errors.push(format!("{}({}):{}", browser.label, profile_label(&profile), err)),
+            }
         }
     }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (home, &mut errors);
-        return Err("自动提取目前仅支持 macOS（Chrome 家族+Safari）；请在浏览器登录后于 GUI 🔑 对话框手动粘贴整行 Cookie".into());
+    match safari_cookie_header(&home, domain) {
+        Ok((header, names)) => {
+            return Ok(Extraction {
+                header,
+                source: "Safari".into(),
+                names,
+            });
+        }
+        Err(err) => errors.push(format!("Safari:{}", err)),
     }
 
     Err(format!(
@@ -100,10 +92,18 @@ pub fn extract_login_cookie(domain: &str) -> Result<Extraction, String> {
     ))
 }
 
+/// 非 macOS：自动提取未支持（Chrome 系 Windows 解密走 DPAPI、Linux 走
+/// gnome-keyring，均为另案），保持手动粘贴路径。
+#[cfg(not(target_os = "macos"))]
+pub fn extract_login_cookie(_domain: &str) -> Result<Extraction, String> {
+    Err("自动提取目前仅支持 macOS（Chrome 家族+Safari）；请在浏览器登录后于 GUI 🔑 对话框手动粘贴整行 Cookie".into())
+}
+
 // ---------------------------------------------------------------------------
 // Chrome 家族：SQLite 直读 + v10 解密
 // ---------------------------------------------------------------------------
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 struct ChromeBrowser {
     label: &'static str,
     /// 相对 $HOME 的 user-data 目录。
@@ -124,6 +124,7 @@ fn chrome_browsers() -> Vec<ChromeBrowser> {
 }
 
 /// 该 user-data 目录下所有带 cookie 库的 profile（Default 优先，其余按名排序）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn chrome_profiles(user_data: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(user_data) else {
         return Vec::new();
@@ -144,6 +145,7 @@ fn chrome_profiles(user_data: &Path) -> Vec<PathBuf> {
     dirs
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn profile_label(profile: &Path) -> String {
     profile
         .file_name()
@@ -154,6 +156,7 @@ fn profile_label(profile: &Path) -> String {
 
 /// Chrome 运行中会锁库——复制（含 WAL/journal）到系统临时目录后只读查询，
 /// 查完即删。返回 (name, 明文 value 列, encrypted_value blob)。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn chrome_query_rows(
     db: &Path,
     domain: &str,
@@ -208,6 +211,7 @@ fn chrome_query_rows(
 
 /// 同名 cookie 去重（多 host 命中同名是常态，如 .google.com 与 accounts.google.com
 /// 的 SID）——与 skill 原版 dict 赋值语义一致：后者覆盖前者。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn dedup_pairs(pairs: Vec<(String, String)>) -> Vec<(String, String)> {
     let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut out: Vec<(String, String)> = Vec::new();
@@ -224,6 +228,7 @@ fn dedup_pairs(pairs: Vec<(String, String)>) -> Vec<(String, String)> {
 }
 
 /// 明文/可解密行 → Cookie 请求头。部分解密失败仍可用（skill 同款语义）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn rows_to_header(
     rows: &[(String, String, Vec<u8>)],
     key_pass: &str,
@@ -264,6 +269,7 @@ fn rows_to_header(
 }
 
 /// PBKDF2-HMAC-SHA1(密码, "saltysalt", 1003 轮, 16B)——Chrome v10 派生密钥。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn derive_v10_key(password: &str) -> [u8; 16] {
     let mut key = [0u8; 16];
     pbkdf2::pbkdf2_hmac::<sha1::Sha1>(password.as_bytes(), b"saltysalt", 1003, &mut key);
@@ -271,6 +277,7 @@ fn derive_v10_key(password: &str) -> [u8; 16] {
 }
 
 /// v10 明文含 0/16/32B host 绑定前缀（2026-07+）——取最长的全可打印后缀。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn printable_suffix(dec: &[u8]) -> Option<String> {
     for skip in [0usize, 16, 32] {
         if skip > dec.len() {
@@ -285,6 +292,7 @@ fn printable_suffix(dec: &[u8]) -> Option<String> {
 }
 
 /// 解密单颗 `v10` cookie：AES-128-CBC（IV=16×0x20）+ PKCS7 + 前缀剥离。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn decrypt_chrome_v10(blob: &[u8], password: &str) -> Result<String, String> {
     if blob.len() < 3 || &blob[..3] != b"v10" {
         return Err(format!(
@@ -396,6 +404,7 @@ pub fn parse_binary_cookies(buf: &[u8]) -> Result<Vec<RawCookie>, String> {
 }
 
 /// Safari cookie 库候选路径（新版 macOS 在 sandbox container 内，需完全磁盘访问）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn safari_paths(home: &Path) -> Vec<PathBuf> {
     vec![
         home.join("Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies"),
@@ -403,6 +412,7 @@ fn safari_paths(home: &Path) -> Vec<PathBuf> {
     ]
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn safari_cookie_header(home: &Path, domain: &str) -> Result<(String, Vec<String>), String> {
     let mut read_err: Option<String> = None;
     let mut parse_err: Option<String> = None;

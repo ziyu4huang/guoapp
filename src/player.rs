@@ -689,10 +689,10 @@ impl Read for IpcConn {
 }
 
 impl IpcConn {
-    fn set_read_timeout_secs(&self, secs: u64) -> std::io::Result<()> {
+    fn set_read_timeout_secs(&self, _secs: u64) -> std::io::Result<()> {
         match self {
             #[cfg(unix)]
-            IpcConn::Unix(s) => s.set_read_timeout(Some(std::time::Duration::from_secs(secs))),
+            IpcConn::Unix(s) => s.set_read_timeout(Some(std::time::Duration::from_secs(_secs))),
             #[cfg(windows)]
             IpcConn::Win(_) => Ok(()),
         }
