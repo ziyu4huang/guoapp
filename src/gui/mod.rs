@@ -36,8 +36,6 @@ struct CoverCache {
 const COVER_WORKERS: usize = 4;
 /// 封面纹理上限（张）——超出逐出最旧（handle drop 即释放显存）
 const COVER_CAP: usize = 300;
-/// 公开端点常态覆盖的免费集数（2026-10-17 实测 3 集；失败提示用）
-const FREE_EPISODE_HINT: usize = 3;
 
 impl CoverCache {
     fn new(msg_tx: mpsc::Sender<Msg>) -> Self {
@@ -753,13 +751,7 @@ impl GuiApp {
                 });
             }
             Err(err) => {
-                // 公开端点(2026-10-17)只覆盖免费集——失败大概率是超出免费
-                // 额度，指路🔑登录而不是让用户对着四层报错发呆
-                let _ = tx.send(Msg::Status(format!(
-                    "{}——此集可能超出免费额度，试试第 1-{}集或🔑登录",
-                    err,
-                    FREE_EPISODE_HINT.min(total.max(1))
-                )));
+                let _ = tx.send(Msg::Status(err));
             }
         });
     }

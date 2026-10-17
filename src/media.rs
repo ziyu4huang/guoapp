@@ -31,6 +31,12 @@ pub fn try_resolve_media(
         }
     }
     let mut errors = Vec::new();
+    // 无签名 multi_video_model(2026-10-17 社区考古):收费集全画质免登录——
+    // 上游只锁了带签名的 video_model,这一路是当前的主取流层
+    match client.multi_video_model(video_id) {
+        Ok(media) => return Ok(media),
+        Err(err) => errors.push(format!("multi 取流：{}", err)),
+    }
     match client.media(store, video_id) {
         Ok(media) => return Ok(media),
         Err(err) => errors.push(format!("App 取流：{}", err)),

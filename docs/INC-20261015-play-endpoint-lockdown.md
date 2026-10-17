@@ -71,3 +71,11 @@
 - **FaaS 路徑把戲全死**:尾綴 ?/雙斜線/%2f/大小寫/.MP4/protected 路徑/%00 → 404/400。
 - **fanqienovel.com 無短劇區**(番茄生態網頁端只有小說/有聲)。
 探針沉澱=tests/probe_register.rs+tests/probe_endpoints.rs(#[ignore] 真網診斷,與 probe_play_raw 同族)。**唯一未驗的門=真登入態(使用者帳號 cookie;GUI ⚡ 自動取+guo web-play 驗證已備好)。**
+
+## 2026-10-17 終章:全集免登入恢復(v0.7.0;使用者令「search internet about the answer」)
+**網路查證命中 GitHub bimoshuxinghe/hongguoTV commit 0815d5ec(10-16「APK 端取址改用无签名+随机设备+多域名」)**——徹底翻案第三輪「EP4+ 不可解」結論:
+- **方法**:`POST /novel/player/multi_video_model/v1/`(此前探針漏了 /v1/ 後綴=404 假陰性教訓)+ **無簽名**(帶 X-Gorgon 反被拒 Code 110001)+ **每次隨機 18 位 device_id/iid**(900e15~999e15)+ **四域名輪詢**(sinfonlinec/sinfonlineb/lf/api5-normal)+ payload `mixed_video_id_map{"1004":[vid]}`/`video_platform:1024`/version_code 71332。
+- **回包**:`data.<vid>.video_model`=內嵌 JSON 字串,video_list 與舊 video_model 同形(360p-1080p 五檔,bytevc1,CENC cenc-aes-ctr+spade_a)——select_app_media/content_key 全復用。
+- **實證**:EP40 resolve=1080p+金鑰;mpv 真播 time-pos 21s/120.23s 推進中;ep1/ep80 同樣 1080p。**免費集也從 360p 公開端點升級到 1080p 主路。**
+- **guoapp 落地**:hgapp.multi_video_model(四域名 failover)+parse_multi_video_model(真樣本單測:五檔/CENC/vid 未命中 Err/業務碼 Err);resolve 鏈首位=multi,回退序=帶簽名 App→web cookie→公開 360p→備用中繼;GUI「前3集免費」提示撤除(不再適用);fixture 路由+真樣本入庫。
+- **教訓入帳**:①「端點不存在」判定前必須窮舉後綴變體(/v1//v2/);②本地探針窮盡≠網路上無解——社區(其他客戶端 repo 的修復 commit)是現成答案庫,早該先搜;③帶簽名被拒=試無簽名(閘常按「過度合法」攔截)。

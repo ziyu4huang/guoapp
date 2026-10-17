@@ -241,8 +241,7 @@ impl HgClient {
             "/novel/player/video_model/v1/",
             Some(&json!({
                 "video_id": video_id,
-                "content_type": 1,
-                "biz_param": { "need_all_video_definition": true, "video_platform": 3 }
+                "content_type": 1,                "biz_param": { "need_all_video_definition": true, "video_platform": 3 }
             })),
         )?;
         let data = jmap(&result, &["data"]);
@@ -253,6 +252,124 @@ impl HgClient {
         }
         select_app_media(&model)
     }
+
+    /// 无签名 multi_video_model（2026-10-17 社区考古：上游对带签名的
+    /// video_model 清空回应用 INC-20261015，但对**无签名 + 随机设备**的
+    /// multi_video_model/v1/ 放行——含收费集全画质，免登录）。
+    /// 方法出处=bimoshuxinghe/hongguoTV commit 0815d5ec：每次请求随机
+    /// 18 位 device_id/iid + 四域名轮询；签名请求会被上游以 Code 110001 拒绝。
+    pub fn multi_video_model(&self, video_id: &str) -> Result<Media, String> {
+        if !is_numeric_id(video_id) {
+            return Err("红果视频 ID 无效".into());
+        }
+        let rid = format!(
+            "{}",
+            900_000_000_000_000_000u64
+                + (std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.subsec_nanos() as u64)
+                    .unwrap_or(0)
+                    % 100_000_000_000_000_000)
+        );
+        let query = encode_query(
+            &[
+                ("iid", rid.as_str()),
+                ("device_id", rid.as_str()),
+                ("ac", "wifi"),
+                ("channel", "update_64"),
+                ("aid", "8662"),
+                ("app_name", "novelread"),
+                ("version_code", "71332"),
+                ("version_name", "7.1.3.32"),
+                ("device_platform", "android"),
+                ("os", "android"),
+                ("ssmix", "a"),
+                ("device_type", "25053RT47C"),
+                ("device_brand", "Redmi"),
+                ("language", "zh"),
+                ("os_api", "36"),
+                ("os_version", "16"),
+                ("manifest_version_code", "71332"),
+                ("resolution", "1280*2772"),
+                ("dpi", "520"),
+                ("update_version_code", "71332"),
+                ("host_abi", "arm64-v8a"),
+                ("dragon_device_type", "phone"),
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect::<Vec<_>>(),
+        );
+        let payload = json!({
+            "biz_param": {
+                "detail_page_version": 0, "device_level": 3, "disable_digg_stat": false,
+                "need_all_video_definition": true, "need_mp4_align": false,
+                "use_os_player": false, "use_server_dns": false, "video_platform": 1024
+            },
+            "mixed_video_id_map": { "1004": [video_id] }
+        });
+        let body = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
+        let hosts = [
+            "https://api5-normal-sinfonlinec.fqnovel.com",
+            "https://api5-normal-sinfonlineb.fqnovel.com",
+            "https://api5-normal-lf.fqnovel.com",
+            "https://api5-normal.fqnovel.com",
+        ];
+        let mut last_err = String::new();
+        for host in hosts {
+            let url = format!("{}/novel/player/multi_video_model/v1/?{}", host, query);
+            let request = self
+                .agent
+                .post(&url)
+                .timeout(Duration::from_secs(12))
+                .set("User-Agent", APP_UA)
+                .set("Accept", "application/json; charset=utf-8,application/x-protobuf")
+                .set("Content-Type", "application/json; charset=UTF-8")
+                .set("x-xs-from-web", "0")
+                .set("x-ss-req-ticket", &crate::sign::now_ms().to_string())
+                .set("x-tt-request-tag", "t=0;n=0")
+                .set("sdk-version", "2")
+                .set("passport-sdk-version", "50561")
+                .set("x-vc-bdturing-sdk-version", "3.7.2.cn");
+            match request.send_bytes(&body) {
+                Ok(response) => {
+                    let mut bytes = Vec::new();
+                    use std::io::Read;
+                    let mut reader = response.into_reader().take(32 * 1024 * 1024);
+                    if reader.read_to_end(&mut bytes).is_err() || bytes.is_empty() {
+                        last_err = "multi 接口响应读取失败".into();
+                        continue;
+                    }
+                    match parse_multi_video_model(&bytes, video_id) {
+                        Ok(media) => return Ok(media),
+                        Err(err) => last_err = err,
+                    }
+                }
+                Err(ureq::Error::Status(code, _)) => last_err = format!("multi 接口 HTTP {}", code),
+                Err(e) => last_err = format!("multi 接口请求失败：{}", e),
+            }
+        }
+        Err(format!("multi 取流失败：{}", last_err))
+    }
+}
+
+/// multi_video_model 回包解析：`data.<vid>.video_model`（内嵌 JSON 字符串）
+/// → 与旧 video_model 同形的 video_list → select_app_media 复用。
+pub fn parse_multi_video_model(bytes: &[u8], video_id: &str) -> Result<Media, String> {
+    let result: Value =
+        serde_json::from_slice(bytes).map_err(|_| "multi 接口返回格式异常".to_string())?;
+    let code = jnum_str(&result, &["code", "Code"]);
+    if !code.is_empty() && code != "0" {
+        return Err(format!("multi 接口业务码 {}", truncate(&code, 20)));
+    }
+    let data = jmap(&result, &["data"]);
+    let entry = data.get(video_id).ok_or("multi 接口未返回所请求的分集")?;
+    let mut model = entry.get("video_model").cloned().unwrap_or(Value::Null);
+    if let Some(encoded) = model.as_str() {
+        model = serde_json::from_str(encoded)
+            .map_err(|_| "multi 播放信息格式异常".to_string())?;
+    }
+    select_app_media(&model)
 }
 
 pub fn encode_query(query: &[(String, String)]) -> String {
@@ -834,5 +951,22 @@ mod tests {
         );
         assert!(valid_sort(SORT_LATEST) && valid_sort(SORT_HOT) && valid_sort(SORT_MOST_VIEWED));
         assert!(!valid_sort("read_cnt") && !valid_sort("popular"));
+    }
+
+    /// multi_video_model 解析（真樣本：EP40 收費集，360p-1080p 五檔+CENC）。
+    #[test]
+    fn parse_multi_video_model_real_fixture() {
+        let raw = include_bytes!("../tests/fixtures/multi-video-model-ep40.real.json");
+        let media =
+            parse_multi_video_model(raw, "7694859913515781145").expect("真樣本應解析成功");
+        assert_eq!(media.quality, 1080, "應選最高畫質: {}", media.quality);
+        assert!(media.url.contains("qznovelvod.com"));
+        assert_eq!(media.referer, "https://novel.snssdk.com/");
+        assert!(media.cenc_key.is_some(), "收費集應帶 CENC 金鑰");
+        assert!(media.variants.len() >= 5, "應保留全畫質變體: {}", media.variants.len());
+        // vid 不在回包 → Err（謊稱成功=黑屏陷阱）
+        assert!(parse_multi_video_model(raw, "1111111111111111111").is_err());
+        // 業務碼非 0 → Err
+        assert!(parse_multi_video_model(br#"{"code":110001,"message":"rejected"}"#, "1").is_err());
     }
 }

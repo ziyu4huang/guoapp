@@ -158,6 +158,14 @@ fn route(
         }
         return ("200 OK".into(), "application/json".into(), serde_json::to_vec(&response).unwrap());
     }
+    if path.starts_with("/novel/player/multi_video_model") {
+        // 無簽名 multi_video_model(主取流層):回真樣本;vid 不在樣本=模擬未命中
+        if path.contains("missing") {
+            return ("200 OK".into(), "application/json".into(), br#"{"code":0,"data":{}}"#.to_vec());
+        }
+        let raw = include_bytes!("../fixtures/multi-video-model-ep40.real.json");
+        return ("200 OK".into(), "application/json".into(), raw.to_vec());
+    }
     if path.starts_with("/novel/player/video_model") || path.starts_with("/novel/player/") {
         // App 取流域：hermetic 測試一律由 GUO_RESOLVE_OVERRIDE 短路到本地，
         // 打進來=觸點外洩——顯式 503 讓它紅，而不是靜默偽裝成功。

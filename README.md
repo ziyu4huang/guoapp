@@ -110,13 +110,15 @@ cargo run --release --bin guo-gui     # 或直接运行 target/release/guo-gui
 | `src/state.rs` | 播放记录/下载片库/偏好持久化（JSON 状态） |
 | `src/gui/` | egui 原生 GUI（目录/搜索/片库/详情双模式/播放条） |
 
-## 播放与登录（重要）
+## 播放说明
 
-上游已锁定匿名 App 取流（2026-10-15，详见
-[INC 文档](docs/INC-20261015-play-endpoint-lockdown.md)），v0.6.0 起取流链新增
-**匿名公开端点**（`/video/public/<vid>/360p.mp4`，2026-10-17 前端 bundle
-考古发现）——**每部剧的前几集（免费试看集）无需登录直接可播**（完整集、
-360p、无加密）；超出免费额度的集仍需登录态：
+**v0.7.0 起全集免登录可直接播放（最高 1080p）**——取流链主路改走无签名
+`multi_video_model` 端点（随机设备 + 多域名轮询，2026-10-17 社区考古所得，
+详见 [INC 文档](docs/INC-20261015-play-endpoint-lockdown.md)），收费集
+同样返回全画质（CENC 加密由内置解密器处理，下载自动解成普通 mp4）。
+若该路被上游封堵，取流链会依次回退：带签名 App 接口 → 登录 cookie 网页层
+→ 匿名公开 360p 端点（每剧前 3 集）→ 备用中继。🔑 登录对话框（浏览器
+cookie 自动获取）保留作备用解锁路径：
 
 1. 详情页点「🔑 登录」→ 点「⚡ 从浏览器自动获取」直接读本机浏览器的红果登录
    cookie（macOS：Chrome/Edge/Brave/Arc/Chromium→Safari 级联；首次访问
