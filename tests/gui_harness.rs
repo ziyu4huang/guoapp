@@ -431,3 +431,64 @@ fn library_builtin_play() {
     });
     eprintln!("✓ 片库 ▶ 内建播放：本地集走 mpv 会话（底栏可见）");
 }
+
+/// 真網 GUI 播放 E2E（非 hermetic：真實上游+真實 multi_video_model 取流+真 mpv）：
+/// 目錄載入 → 開詳情 → 點**收費集**集數格（第 2 集以後均可，此處點第 2 集
+/// 避開公開端點干擾——v0.7.0 主路=multi_video_model 全集可用）→ 必須出現
+/// 「正在播放：第N集」。這是 GUI 線程→取流鏈→mpv 會話的完整驗收。
+/// 运行：cargo test --test gui_harness gui_play_real_network -- --ignored --nocapture
+#[test]
+#[ignore]
+fn gui_play_real_network() {
+    std::env::set_var("GUO_MPV_ARGS", "--vo=null --ao=null");
+    std::env::set_var("GUOAPP_DATA", temp_data_dir());
+    // 注意：不裝 hermetic env（不打 GUO_RESOLVE_OVERRIDE/GUO_APP_BASE）——
+    // 本測試就是為了驗真實上游。
+    let mut harness: H = Harness::builder()
+        .with_size(egui::vec2(1180.0, 760.0))
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| guo::gui::GuiApp::new(cc));
+
+    pump_until(&mut harness, 60, |h| {
+        h.query_all_by_label_contains("共").count() >= 20
+    });
+    const FIXED: [&str; 3] = ["清空封面缓存", "刷新", "搜索"];
+    let title = harness
+        .query_all_by(|node| {
+            node.role() == accesskit::Role::Button && node.toggled().is_none()
+        })
+        .filter_map(|node| node.label().map(|l| l.to_string()))
+        .find(|label| {
+            !FIXED.contains(&label.as_str())
+                && !label.starts_with("更多")
+                && !label.starts_with("真人剧")
+                && !label.starts_with("漫剧")
+                && !label.starts_with("AI剧")
+                && !label.starts_with("⬇")
+                && !label.starts_with("▶")
+                && label.chars().count() > 2
+        })
+        .expect("no cards");
+    harness
+        .get_by_role_and_label(accesskit::Role::Button, &title)
+        .click();
+    pump_until(&mut harness, 40, |h| {
+        h.query_by_label_contains("点击集数即播放").is_some()
+    });
+
+    // 點第 5 集（任何 >3 的集都超出公開額度=只有 multi 路能解；若詳情不足 5 集退第 2 集）
+    let total_eps: usize = harness
+        .query_all_by_label_contains("共")
+        .filter_map(|n| n.label().and_then(|l| digits(&l)))
+        .max()
+        .unwrap_or(5);
+    let ep = total_eps.min(5).max(2);
+    eprintln!("點第 {} 集（total={}）", ep, total_eps);
+    harness
+        .get_by_role_and_label(accesskit::Role::Button, &ep.to_string())
+        .click();
+    pump_until(&mut harness, 60, |h| {
+        h.query_by_label_contains(&format!("正在播放：第{}集", ep)).is_some()
+    });
+    eprintln!("✓ 真網 GUI 播放：詳情點第 {} 集 → 正在播放（multi 取流+mpv 會話全通）", ep);
+}
