@@ -61,3 +61,13 @@
 - **djapi 中繼活著但無數據**(200 但不回媒體)。
 - **上游另接的鏡像站**(huangguoai.com+五鏡像/sorani.net/guipian/hanxiaoquan)=成人內容鏡像庫,與紅果劇目不同源;接線屬產品決策(公開 repo 內容風險),未動。
 **結論:第 4 集起的免登入解鎖不存在可寫代碼的路徑;唯一未驗的門=真登入態(GUI ⚡ 自動取 cookie)。**
+
+## 2026-10-17 第三輪:EP4+ 專項普查(使用者令「EP4以上是不是也可以解」)
+**結論:EP4+ 免登入不可解——閘是帳號權益(服務端按劇的 vid 級授權),非設備/版本/cookie 可繞。** 全向量實測:
+- **applog 設備註冊被拒**:log.snssdk.com/service/2/device_register/ 回 200 但 device_id=0/install_id=0(新代 applog 要 X-Argus 證言)——本地自造 device_id 無法升級成正規註冊設備。
+- **紅果 passport 註冊無權限**:/passport/device/register/ 端點存在但 error_code=16「該應用無權限」(需 App 證言);其餘 register 路徑 404。
+- **播放端點族 7 變體**:video_model/v2 空、multi_video_model/short_video_model/duanju/player/reading 系/player/video_play_info 全 404。
+- **ttwid(匿名設備會話)無差**:帶新鮮 ttwid 訪 ep40 播放頁仍 404、公開端點仍 404——**公開集是 vid 內生屬性**(每劇前 3 集),非 cookie 記帳式額度,輪換 cookie 無效。
+- **FaaS 路徑把戲全死**:尾綴 ?/雙斜線/%2f/大小寫/.MP4/protected 路徑/%00 → 404/400。
+- **fanqienovel.com 無短劇區**(番茄生態網頁端只有小說/有聲)。
+探針沉澱=tests/probe_register.rs+tests/probe_endpoints.rs(#[ignore] 真網診斷,與 probe_play_raw 同族)。**唯一未驗的門=真登入態(使用者帳號 cookie;GUI ⚡ 自動取+guo web-play 驗證已備好)。**
