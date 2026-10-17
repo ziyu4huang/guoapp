@@ -482,7 +482,7 @@ fn gui_play_real_network() {
         .filter_map(|n| n.label().and_then(|l| digits(&l)))
         .max()
         .unwrap_or(5);
-    let ep = total_eps.min(5).max(2);
+    let ep = total_eps.clamp(2, 5);
     eprintln!("點第 {} 集（total={}）", ep, total_eps);
     harness
         .get_by_role_and_label(accesskit::Role::Button, &ep.to_string())
