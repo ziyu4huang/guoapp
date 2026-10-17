@@ -166,6 +166,14 @@ fn route(
     if path.starts_with("/incent_resource/suggestion") {
         return ("200 OK".into(), "application/json".into(), serde_json::to_vec(suggestion).unwrap());
     }
+    if path.starts_with("/video/public/") {
+        // 公開播放端點(2026-10-17 發現):免費集直出。fixture 回小檔——
+        // public_media 探針只驗狀態碼;路徑含 "paid" 模擬收費集 404
+        if path.contains("paid") {
+            return ("404 NOT FOUND".into(), "text/plain".into(), b"not in public quota".to_vec());
+        }
+        return ("200 OK".into(), "video/mp4".into(), cover_png.to_vec());
+    }
     if path.starts_with("/search/") {
         return ("200 OK".into(), "text/html; charset=utf-8".into(), web_search.to_vec());
     }

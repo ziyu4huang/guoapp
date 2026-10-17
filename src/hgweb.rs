@@ -216,6 +216,43 @@ impl HgClient {
         Ok(media)
     }
 
+    /// 匿名公开播放端点探针（2026-10-17 前端 bundle 考古发现）：
+    /// `/video/public/<vid>/360p.mp4` —— 免费试看集**匿名直出完整集**（360p、
+    /// 无加密、支持 Range），不需要任何特殊 headers；收费集 404 → 留给后续
+    /// 取流路（登录 cookie）。命中即返回 360p 直链。
+    pub fn public_media(&self, video_id: &str) -> Result<Media, String> {
+        let url = format!(
+            "{}/video/public/{}/360p.mp4",
+            crate::hgapp::web_base(),
+            video_id
+        );
+        let response = self
+            .agent
+            .get(&url)
+            .timeout(Duration::from_secs(8))
+            .set("Range", "bytes=0-0")
+            .set("User-Agent", WEB_UA)
+            .call();
+        match response {
+            Ok(r) => {
+                let status = r.status();
+                if status == 206 || status == 200 {
+                    Ok(Media {
+                        url,
+                        referer: format!("{}/", crate::hgapp::WEB_BASE),
+                        quality: 360,
+                        cenc_key: None,
+                        variants: Vec::new(),
+                    })
+                } else {
+                    Err(format!("该集不在公开额度内（HTTP {}）", status))
+                }
+            }
+            Err(ureq::Error::Status(code, _)) => Err(format!("HTTP {}", code)),
+            Err(e) => Err(format!("请求失败：{}", e)),
+        }
+    }
+
     /// Web search page.
     pub fn web_search(&self, keyword: &str) -> Result<(Vec<Drama>, i64), String> {
         let body = self.fetch_page(&format!("{}/search/{}", web_base(), urlencode(keyword)))?;

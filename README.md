@@ -110,17 +110,19 @@ cargo run --release --bin guo-gui     # 或直接运行 target/release/guo-gui
 | `src/state.rs` | 播放记录/下载片库/偏好持久化（JSON 状态） |
 | `src/gui/` | egui 原生 GUI（目录/搜索/片库/详情双模式/播放条） |
 
-## 登录解锁取流（重要）
+## 播放与登录（重要）
 
-上游已锁定匿名取流（2026-10-15，详见
-[INC 文档](docs/INC-20261015-play-endpoint-lockdown.md)），未登录时点击播放会提示
-「取流失败」。试行解锁路径：
+上游已锁定匿名 App 取流（2026-10-15，详见
+[INC 文档](docs/INC-20261015-play-endpoint-lockdown.md)），v0.6.0 起取流链新增
+**匿名公开端点**（`/video/public/<vid>/360p.mp4`，2026-10-17 前端 bundle
+考古发现）——**每部剧的前几集（免费试看集）无需登录直接可播**（完整集、
+360p、无加密）；超出免费额度的集仍需登录态：
 
 1. 详情页点「🔑 登录」→ 点「⚡ 从浏览器自动获取」直接读本机浏览器的红果登录
    cookie（macOS：Chrome/Edge/Brave/Arc/Chromium→Safari 级联；首次访问
    Chrome 系会弹钥匙圈授权对话框，点「允许」即可，此后免打扰）；
    非 macOS 或自动获取失败时，按对话框三步手动粘贴整行 Cookie（仅存本机）；
-2. 重新点击要播放的集数——cookie 解锁有效即可恢复播放；
+2. 重新点击要播放的集数；
 3. 命令行一步到位：`guo cookie` 自动提取并保存（`--no-save` 试提取、
    `--domain <域名>` 换目标域），再用 `guo web-play <series_id> <video_id>` 验证。
 
@@ -128,7 +130,7 @@ cargo run --release --bin guo-gui     # 或直接运行 target/release/guo-gui
 hongguoduanju.com，先登录一次，之后 `guo cookie` / ⚡ 按钮随时一键同步。
 Cookie 值永不打印到日志/输出（一律脱敏显示），只落本机数据目录 state.json。
 
-若 cookie 路径无效（上游改动仍在加码），片库已下载的内容不受影响。
+若该集超出免费额度且 cookie 未解锁，片库已下载的内容不受影响。
 
 ## 下载安装（预编译）
 

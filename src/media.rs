@@ -40,6 +40,12 @@ pub fn try_resolve_media(
         Ok(media) => return Ok(media),
         Err(err) => errors.push(format!("网页取流：{}", err)),
     }
+    // 匿名公开端点:免费试看集直出完整 360p(2026-10-17 前端 bundle 考古;
+    // 收费集 404 快速失败,留给出备用中继)
+    match client.public_media(video_id) {
+        Ok(media) => return Ok(media),
+        Err(err) => errors.push(format!("公开取流：{}", err)),
+    }
     match client.backup_media(series_id, video_id) {
         Ok(media) => return Ok(media),
         Err(err) => errors.push(format!("备用取流：{}", err)),

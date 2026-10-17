@@ -43,3 +43,10 @@
 
 ## 附帶
 診斷探針保留:`cargo test --test probe_play_raw -- --ignored --nocapture`(GUO_PROBE_VIDEO 可換 video_id)。
+
+## 2026-10-17 後記:匿名公開端點發現,免費集播放恢復(v0.6.0)
+- **發現路徑**:播放頁 SSR 形狀已變(`player_(series_id)/(vid)/page`,新欄位 `protectedPlayback:true`/`publicVideoSeo`/`videoList` 空=登入閘仍在);改挖前端 bundle `player.*.js` → 找到構造器 `"/video/public/".concat(vid,"/360p.mp4")`(配合 `publicVideoSeo.available`)。
+- **端點實渉**:`GET /video/public/<vid>/360p.mp4` 匿名 206 直出**完整集** MP4(avc1,175.63s 與 SEO 元數據吻合,Range 支援,免 UA/Referer);僅 360p(480p+ 全 404);覆蓋=每劇前幾集免費額度(實測劇目 ep1-3 可/ep40/80 404);App 簽名端點同日仍空(body len=0)=鎖定未撤,公開端點是**並行的另一扇門**。
+- **guoapp 落地**:`hgweb.public_media`(Range 0-0 探針驗 206/200)接入取流鏈第四層(web cookie 之後、備用中繼之前——登入態可得高畫質故優先);GUI 取流失敗提示指路「前幾集免費/🔑登錄」;fixture 伺服器補 `/video/public/` 路由+tests/public_media.rs(命中/404 兩測,404 誤報成功=黑屏陷阱已釘)。
+- **驗證**:CLI resolve 免費集=360p 直鏈;mpv 真播 time-pos 34.4s/175.6s 推進中;收費集四層誠實報錯。
+- **未驗**:登入 cookie 對 `protectedPlayback` 劇集的實際解鎖效果(本機無紅果登入態);高畫質公開變體(僅 360p 存在)。
