@@ -401,6 +401,26 @@ impl GuiApp {
         for genre in GENRES.iter() {
             app.request_catalog_page(genre.key);
         }
+        // 真窗口串流冒煙後門(調試/驗收用):GUO_GUI_SMOKE_PLAY="<劇ID>|<集數>"
+        // 走與卡片 ▶ 完全相同的內部路徑自動開播(詳情載入→auto_play→取流→
+        // 真窗口 mpv)——kittest 無頭覆蓋不了的「真 GUI 運行時」驗收入口。
+        if let Ok(spec) = std::env::var("GUO_GUI_SMOKE_PLAY") {
+            if let Some((id, ep)) = spec.split_once('|') {
+                if let Ok(ep) = ep.trim().parse::<usize>() {
+                    let drama = Drama {
+                        id: id.trim().to_string(),
+                        source: "hongguo".into(),
+                        source_id: id
+                            .trim()
+                            .trim_start_matches("hongguo:")
+                            .to_string(),
+                        ..Drama::default()
+                    };
+                    eprintln!("[smoke] 自動開播 {} 第 {} 集(真窗口)", drama.id, ep);
+                    app.open_detail(&drama, Some(ep));
+                }
+            }
+        }
         app
     }
 
