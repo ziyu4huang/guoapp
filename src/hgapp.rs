@@ -74,13 +74,22 @@ impl HgClient {
     }
 
     fn common_query(&self, store: &Store) -> Vec<(String, String)> {
+        let version_code = std::env::var("GUO_APP_VERSION_CODE")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| "73532".into());
+        let version_name = format!(
+            "{}.{}",
+            version_code.get(0..1).unwrap_or("7"),
+            version_code.get(1..).unwrap_or("0")
+        );
         let mut q: Vec<(String, String)> = [
             ("aid", "8662"),
             ("app_name", "novelread"),
-            ("version_code", "73532"),
-            ("version_name", "7.3.5.32"),
-            ("manifest_version_code", "73532"),
-            ("update_version_code", "73532"),
+            ("version_code", ""),
+            ("version_name", ""),
+            ("manifest_version_code", ""),
+            ("update_version_code", ""),
             ("channel", "update_64"),
             ("device_platform", "android"),
             ("os", "android"),
@@ -97,6 +106,11 @@ impl HgClient {
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
+        for key in ["version_code", "version_name", "manifest_version_code", "update_version_code"] {
+            if let Some(slot) = q.iter_mut().find(|(k, _)| k == key) {
+                slot.1 = if key == "version_name" { version_name.clone() } else { version_code.clone() };
+            }
+        }
         q.push(("device_id".into(), store.state.device_id.clone()));
         q.push(("iid".into(), store.state.install_id.clone()));
         q

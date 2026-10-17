@@ -50,3 +50,14 @@
 - **guoapp 落地**:`hgweb.public_media`(Range 0-0 探針驗 206/200)接入取流鏈第四層(web cookie 之後、備用中繼之前——登入態可得高畫質故優先);GUI 取流失敗提示指路「前幾集免費/🔑登錄」;fixture 伺服器補 `/video/public/` 路由+tests/public_media.rs(命中/404 兩測,404 誤報成功=黑屏陷阱已釘)。
 - **驗證**:CLI resolve 免費集=360p 直鏈;mpv 真播 time-pos 34.4s/175.6s 推進中;收費集四層誠實報錯。
 - **未驗**:登入 cookie 對 `protectedPlayback` 劇集的實際解鎖效果(本機無紅果登入態);高畫質公開變體(僅 360p 存在)。
+
+## 2026-10-17 第二輪:免登入免 cookie 全路徑普查(證偽勿重測)
+使用者令「try again, get resource without login and cookie」——窮舉後**紅果本體免登入可得=每劇前 3 集 360p**(全站統一,兩劇實測 ep1-3=206/ep4+=404;已在 v0.6.0 接線)。其餘全路死因入帳:
+- **App 層與版本無關**:version_code 73532/74000/74102/75000/76000 五檔 A/B 全空回應——閘不在版本淘汰,在設備指紋/Argus 證言或登入態(GUO_APP_VERSION_CODE env 覆寫留作探針工具)。
+- **SSR 對收費集整頁隱藏**:ep40 播放頁匿名=HTTP 404(非 200+空數據);免費集頁 200 但 video_player_info/videoList 空anonymous(protectedPlayback:true)。播放數據=純 SSR 供給(player.js 考據 playerData=u.video_player_info),無客戶端播放 API 可模擬。
+- **qznovelvod CDN 族不可直連**:v1-hgweb/v1-reading.qznovelvod.com DNS 不解析(內部命名);受保護 URL 帶 x-amz-signature/play_auth_token 簽名(q.js 日誌脫敏器鍵名清單實錄),無簽名不可構造。
+- **React Router .data 取數路由**:404(非 single-fetch 形態)。
+- **上游 Go 原版同樣只有 api5-normal-sinfonlineb 單 host**(novel.snssdk.com 僅 Referer),無備用 host 族可切。
+- **djapi 中繼活著但無數據**(200 但不回媒體)。
+- **上游另接的鏡像站**(huangguoai.com+五鏡像/sorani.net/guipian/hanxiaoquan)=成人內容鏡像庫,與紅果劇目不同源;接線屬產品決策(公開 repo 內容風險),未動。
+**結論:第 4 集起的免登入解鎖不存在可寫代碼的路徑;唯一未驗的門=真登入態(GUI ⚡ 自動取 cookie)。**
